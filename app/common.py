@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from contextlib import contextmanager
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -85,21 +87,34 @@ def load_weather_daily() -> pd.DataFrame | None:
     return pd.read_parquet(config.WEATHER_DAILY_PATH)
 
 
-@st.cache_data(show_spinner="Scoring hours against baseline...")
-def run_anomaly(use: str = "ac", b0: str = config.QB_BASELINE[0], b1: str = config.QB_BASELINE[1],
-                t0: str = config.QB_HOLDOUT[0], t1: str = config.QB_HOLDOUT[1], ql: int = 5,
-                qh: int = 95, margin: float = 0.25, min_h: int = 2, min_days: int = 10):
-    from cubems.anomaly import baseline_bands, detect_episodes, hourly_kw
+def _results(question: str, strict: bool) -> Path:
+    return config.results_dir(question, config.STRICT_HOUR_MINUTES if strict else config.MIN_HOUR_MINUTES)
 
-    zd, h = load_zone_day(), load_hourly()
-    groups = ["Model 1"] if use == "ac" else ["Model 1", "Model 2"]
-    hk = hourly_kw(h, zd[zd["group"].isin(groups)], use)
-    bands = baseline_bands(hk, b0, b1, (ql / 100, qh / 100), min_days)
-    replay = hk[hk["date"].between(pd.Timestamp(t0), pd.Timestamp(t1))]
-    scored = replay.merge(bands, on=["floor", "zone", "day_type", "hour"], how="inner")
-    scored, ep = detect_episodes(scored, margin, min_h)
-    scored["zone_id"] = "F" + scored["floor"].astype(str) + "Z" + scored["zone"].astype(str)
-    return scored, ep
+
+@st.cache_data(show_spinner="Loading Question A results...")
+def load_qa(name: str, strict: bool = False) -> pd.DataFrame | None:
+    p = _results("qa", strict) / f"{name}.parquet"
+    return pd.read_parquet(p) if p.exists() else None
+
+
+@st.cache_data(show_spinner="Loading Question B results...")
+def load_qb(name: str, strict: bool = False) -> pd.DataFrame | None:
+    p = _results("qb", strict) / f"{name}.parquet"
+    return pd.read_parquet(p) if p.exists() else None
+
+
+@st.cache_data
+def load_qb_decision(strict: bool = False) -> dict | None:
+    p = _results("qb", strict) / "decision.json"
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+def need(obj, script: str):
+    if obj is None:
+        cmd = rf".venv\Scripts\python scripts\{script}"
+        st.warning(f"Results not built yet. From the repo root run:\n\n```\n{cmd}\n```")
+        st.stop()
+    return obj
 
 
 # ---------------------------------------------------------------- helpers
@@ -129,8 +144,8 @@ def card(title: str, takeaway: str | None = None, note: str | None = None):
 
 
 def usable_note() -> str:
-    return (f"Usable zone-days only (≥{config.MIN_DAY_COVERAGE:.0%} of minutes with every power channel "
-            "recorded). Gap days are dropped, never filled with zeros. kWh = Σ valid minute kW / 60.")
+    return (f"Complete zone-days only: all 24 hours valid (≥{config.MIN_HOUR_MINUTES}/60 minutes) for every end use of "
+            "the zone's group. Gaps are dropped, never filled with zeros. Hourly kWh = mean kW × 1 h.")
 
 
 def style(fig: go.Figure, height: int = 380, legend: bool = True) -> go.Figure:

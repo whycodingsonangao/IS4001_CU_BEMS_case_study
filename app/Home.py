@@ -3,8 +3,7 @@
 import streamlit as st
 from common import apply_style
 
-st.set_page_config(page_title="Where to Look First · CU-BEMS", page_icon=":material/bolt:",
-                   layout="wide")
+st.set_page_config(page_title="Where to Look First · CU-BEMS", page_icon=":material/bolt:", layout="wide")
 apply_style()
 
 pages = {
@@ -13,19 +12,19 @@ pages = {
     ],
     "A · Where energy goes": [
         st.Page("views/composition.py", title="Energy composition", icon=":material/stacked_bar_chart:"),
+        st.Page("views/patterns.py", title="Daily patterns (k-means)", icon=":material/ssid_chart:"),
         st.Page("views/weather.py", title="Weather and AC", icon=":material/thermostat:"),
-        st.Page("views/profiles.py", title="Daily profiles", icon=":material/ssid_chart:"),
     ],
-    "B · Zone exceptions": [
-        st.Page("views/anomaly.py", title="Anomaly explorer", icon=":material/crisis_alert:"),
-        st.Page("views/folds.py", title="Seasonal folds", icon=":material/calendar_month:"),
+    "B · Day-ahead AC forecast": [
+        st.Page("views/forecast.py", title="Forecast accuracy", icon=":material/query_stats:"),
+        st.Page("views/exceptions.py", title="Exceptions", icon=":material/crisis_alert:"),
     ],
     "Data": [
         st.Page("views/quality.py", title="Data quality", icon=":material/fact_check:"),
+        st.Page("views/sensitivity.py", title="Sensitivity (60/60)", icon=":material/compare_arrows:"),
     ],
 }
 nav = st.navigation(pages)
 with st.sidebar:
-    st.caption("IS4001 Group 7 · CU-BEMS 2018–19  \nWeather data by [Open-Meteo.com](https://open-meteo.com/) "
-               "(CC BY 4.0)")
+    st.caption("IS4001 Group 7 · CU-BEMS 2019  \nWeather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0)")
 nav.run()

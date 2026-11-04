@@ -1,7 +1,7 @@
 """Project-wide paths and analysis constants.
 
-Every number that encodes a methodological decision lives here, so the team can
-change it in one place and the pipeline, notebooks and dashboard stay consistent.
+Every number that encodes a methodological decision lives here, so the pipeline, notebooks and
+dashboard stay consistent. Labels follow the methodology plan: [V] verified, [A] assumption, [D] decision.
 """
 
 from __future__ import annotations
@@ -16,32 +16,46 @@ RAW_DIR = Path(os.environ.get("CUBEMS_RAW_DIR", DATA_DIR / "raw"))
 INTERIM_DIR = DATA_DIR / "interim"
 PROCESSED_DIR = DATA_DIR / "processed"
 EXTERNAL_DIR = DATA_DIR / "external"
+REFERENCES_DIR = ROOT / "references"
 
 HOURLY_PATH = PROCESSED_DIR / "zone_hourly.parquet"
 ZONE_DAY_PATH = PROCESSED_DIR / "zone_day.parquet"
 ZONES_PATH = PROCESSED_DIR / "zones.parquet"
 WEATHER_HOURLY_PATH = EXTERNAL_DIR / "weather_hourly.parquet"
 WEATHER_DAILY_PATH = PROCESSED_DIR / "weather_daily.parquet"
+HOLIDAYS_PATH = REFERENCES_DIR / "thai_holidays_2019.csv"
+
+
+def results_dir(question: str, min_minutes: int) -> Path:
+    """data/processed/qa or qa_strict (Question A), qb or qb_strict (Question B)."""
+    return PROCESSED_DIR / (question if min_minutes == MIN_HOUR_MINUTES else f"{question}_strict")
+
 
 # ---------------------------------------------------------------- data rules
 MINUTES_PER_DAY = 1440
-# A zone-day is usable when at least this share of its minutes has every power
-# channel of that zone recorded (joint-meter coverage). Gaps are dropped, never filled.
-MIN_DAY_COVERAGE = 0.95
-# An hour counts as a valid monitored hour when at least this many minutes are present.
+# [D] An hour is valid when at least 57 of its 60 minutes are valid (max kWh error 5%).
+#     A minute is valid for an end use only if every circuit of that end use has a reading.
 MIN_HOUR_MINUTES = 57
+# [D] Sensitivity check: every result is re-run with the strict 60/60 rule.
+STRICT_HOUR_MINUTES = 60
 # Per-minute kW readings above this are flagged as "extreme" (flag, never delete).
-# Largest plausible single-zone load is well under this; e.g. F1 z3 lighting 4,762 kW in 2018.
 EXTREME_KW = 500.0
 
 # ---------------------------------------------------------------- time windows
-TZ = "Asia/Bangkok"  # CU-BEMS timestamps are local time
-QA_WINDOW = ("2019-01-01", "2019-12-31")  # Question A: all of 2019
-QB_BASELINE = ("2019-01-01", "2019-08-31")  # Question B: learn "normal"
-QB_HOLDOUT = ("2019-09-01", "2019-12-31")  # Question B: replay / test
-HISTORY_2018 = ("2018-07-01", "2018-12-31")  # optional extra folds (team decision pending)
+TZ = "Asia/Bangkok"  # [A] timestamps are Bangkok local time (AC on 08:00, off 12-13, off 17:00)
+YEAR = 2019  # [D] all of 2019 is the analysis period; 2018 only for an optional check
+YEAR_WINDOW = ("2019-01-01", "2019-12-31")
+FLOOR_COMPARE_END = "2019-10-21"  # [D] floor comparisons stop at Floor 6's last full day
+HISTORY_2018 = ("2018-07-01", "2018-12-31")
 
-# Bangkok seasons, in whole months (Thai Meteorological Department convention).
+# Question B: chronological, expanding window, monthly refit [D]
+QB_LAG_HISTORY = ("2019-01-01", "2019-01-07")  # only used to build lags
+QB_TRAIN_START = "2019-01-08"
+QB_DEV_TEST_MONTHS = ["2019-05", "2019-06", "2019-07", "2019-08"]
+QB_FINAL_TEST_MONTHS = ["2019-09", "2019-10", "2019-11", "2019-12"]
+QB_NMBE_LIMIT = 5.0  # boosting stays primary only if |NMBE| <= 5 % on development folds
+
+# Bangkok seasons in whole months (Thai Meteorological Department convention)
 SEASON_BY_MONTH = {
     1: "Cool", 2: "Cool", 3: "Hot", 4: "Hot", 5: "Hot",
     6: "Rainy", 7: "Rainy", 8: "Rainy", 9: "Rainy", 10: "Rainy",
@@ -49,8 +63,7 @@ SEASON_BY_MONTH = {
 }
 
 # ---------------------------------------------------------------- weather
-# CU-BEMS is the Chamchuri 5 building, Chulalongkorn University, Bangkok.
-SITE_LAT = 13.7375
+SITE_LAT = 13.7375  # Chamchuri 5 building, Chulalongkorn University
 SITE_LON = 100.5311
 WEATHER_VARS = [
     "temperature_2m",
@@ -61,13 +74,23 @@ WEATHER_VARS = [
     "precipitation",
     "cloud_cover",
 ]
-# Base temperature for cooling degree-hours. 24 °C is a common tropical-office base;
-# test sensitivity (e.g. 22, 26) before relying on it.
 CDH_BASE_C = 24.0
+# [V] ERA5 hourly temperature jumps >= 2 degC at fixed clock hours, so models use day-level weather only
+QB_WEATHER_FEATURES = ["wx_temp_mean", "wx_temp_max", "wx_dew_point_mean", "wx_radiation_kwh_m2", "wx_precip_mm"]
 
-# ---------------------------------------------------------------- scope
-# Proposal scope: Model 1 = 23 fully equipped zones, Model 2 = 8 lighting+plug zones.
-MODEL1_ZONES = {2: [1, 2, 4], **{f: [1, 2, 4, 5] for f in range(3, 8)}}
-MODEL2_ZONES = {1: [1, 3], 2: [3], **{f: [3] for f in range(3, 8)}}
+# ---------------------------------------------------------------- zone groups [V]
+# C1 = AC + lighting + plugs (24 zones, incl. F1z2). C2 = lighting + plugs (8). F1z4 = lighting only.
+C1_ZONES = {1: [2], 2: [1, 2, 4], **{f: [1, 2, 4, 5] for f in range(3, 8)}}
+C2_ZONES = {1: [1, 3], 2: [3], **{f: [3] for f in range(3, 8)}}
+LIGHT_ONLY_ZONES = {1: [4]}
+GROUP_USES = {"C1": ["AC", "Light", "Plug"], "C2": ["Light", "Plug"], "Lighting only": ["Light"]}
 
 END_USES = ["AC", "Light", "Plug"]
+
+# ---------------------------------------------------------------- Question A [D]
+QA_K_RANGE = range(3, 9)
+QA_MIN_CLUSTER_SHARE = 0.03  # every cluster holds >= 3 % of zone-days ...
+QA_MIN_CLUSTER_ZONES = 3  # ... and appears in >= 3 zones
+QA_MIN_HALF_YEAR_ARI = 0.8
+QA_P95_FLOOR_KWH = 0.1  # floor on the 95th-percentile scaler so near-flat channels aren't amplified
+QA_ATYPICAL_PCTL = 99  # days farther than this percentile from their centroid are flagged (kept)

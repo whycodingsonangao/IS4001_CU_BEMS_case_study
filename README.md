@@ -1,21 +1,24 @@
 # Where to Look First: Energy Priorities and Zone Exceptions
 
-**IS4001 Group 7 · CU-BEMS case study.** We show facilities managers where the building's
-electricity goes (Question A) and which zones are drifting from their normal behaviour
-(Question B), so they know where to look first.
+**IS4001 Group 7 · CU-BEMS case study.** We show facilities managers where the building's electricity goes
+(Question A), how well each zone's AC use can be predicted a day ahead (Question B), and which zones then
+behave unexpectedly (the exception layer on top of B). The design follows the team's methodology plan.
 
-| | Question A (descriptive) | Question B (anomaly detection) |
+| | A: descriptive | B: predictive |
 |---|---|---|
-| Asks | What drives consumption, and how does it vary across floors, end uses and operating patterns? | Which zones show persistent, unexpected changes in AC operation or indoor conditions? |
-| Window | Jan–Dec 2019 | Baseline Jan–Aug 2019 → holdout Sep–Dec 2019, plus within-season month folds |
-| KPIs | Normalised kWh baseline, % energy change | Event rate, duration burden (per valid monitored hour) |
+| Asks | Which daily electricity patterns recur, and how much kWh does each account for? | How well can each zone's hourly AC use for the next day be predicted? |
+| Unit | Zone-day | Zone-hour |
+| Method | k-means on 24 hourly kWh per end use (C1: 72, C2: 48 features), 95th-percentile scaling | Same-hour-last-week benchmark vs Poisson gradient boosting (monotone) vs Ridge |
+| Evaluation | k in 3–8: size rule → half-year ARI ≥ 0.8 → silhouette → interpretability; Ward cross-check | Chronological expanding window, monthly refit: dev May–Aug, final test Sep–Dec |
+| KPIs | kWh per cluster, zone, floor and end use | MAE (primary), RMSE, NMBE, skill vs benchmark; exception event rate and duration burden |
+
+A's cluster labels are never inputs to B.
 
 ## Stack
 
-Python 3.11+ end to end: **pandas/pyarrow** for the pipeline, **scikit-learn** (K-means) and
-**XGBoost** for modelling, and **Streamlit + Plotly** for the localhost dashboard. Analysis code
-lives in an importable package (`src/cubems`), so notebooks and the dashboard share one
-implementation of every rule.
+Python 3.11+ end to end: **pandas/pyarrow** for the pipeline, **scikit-learn** (k-means, Ridge) and **XGBoost** for
+modelling, and **Streamlit + Plotly** for the localhost dashboard. Analysis code lives in an importable package
+(`src/cubems`), so scripts, notebooks and the dashboard share one implementation of every rule.
 
 ## Setup (Windows, PowerShell)
 
@@ -49,10 +52,20 @@ that are already valid, so re-running it is safe.
 
 | Output | Grain | Contents |
 |---|---|---|
-| `data/processed/zone_hourly.parquet` | zone × hour | kWh per end use (AC / Light / Plug), valid-minute counts, indoor sensor means |
-| `data/processed/zone_day.parquet` | zone × day | kWh, joint-meter coverage, `usable` flag, calendar (season, Thai holidays, day type, window), weather features `wx_*` |
-| `data/processed/zones.parquet` | zone | Model group, AC unit count, sensors |
+| `data/processed/zone_hourly.parquet` | zone × hour | kWh per end use (mean kW × 1 h), valid-minute counts, indoor sensor means |
+| `data/processed/zone_day.parquet` | zone × day | kWh over valid hours, valid hours per end use, `usable` (57/60) and `usable_strict` (60/60), calendar (official holidays, day type, season), weather `wx_*` |
+| `data/processed/zones.parquet` | zone | Group (C1 / C2 / Lighting only), AC unit count, sensors |
 | `data/processed/weather_daily.parquet` | day | Mean/max/min temperature, RH, dew point, radiation, cooling degree-hours |
+
+## Run the analysis
+
+```powershell
+python scripts/run_question_a.py   # ~30 s: k-means for C1 and C2, main + strict 60/60 run -> data/processed/qa*/
+python scripts/run_question_b.py   # ~3 min: dev folds, model decision, final test, exceptions -> data/processed/qb*/
+```
+
+Both scripts run the main 57/60 rule, then the strict 60/60 sensitivity run (`--main-only` skips it).
+Question B also runs the weekly-block CV diagnostic once (`--skip-diagnostic` skips it).
 
 ## Run the dashboard
 
@@ -62,49 +75,63 @@ streamlit run app/Home.py     # opens http://localhost:8501 (light/dark follows 
 
 | Page | What it shows |
 |---|---|
-| Data quality | Recomputed proposal scope table, zone × month usable heatmap, coverage per day, extreme-reading register |
-| Energy composition (Q-A) | Floor × end-use stack, Pareto zone ranking (kWh per usable day), hour × weekday load, after-hours load |
-| Weather and AC (Q-A) | Open-Meteo timeline, AC kWh vs weather feature, per-zone sensitivity (kWh per °C what-if) |
-| Daily profiles | K-means on normalised 24-h profiles (Model 1 / Model 2), silhouette, pattern by day type / zone / month |
-| Seasonal folds (Q-B) | Leave-one-month-out within Hot / Rainy / Cool, fold coverage, optional 2018 months |
-| Anomaly explorer (Q-B) | P5–P95 baseline band, sustained-episode detection, event rate and duration burden KPIs, exception list (CSV), band chart |
+| Energy composition (A) | Floor × end-use stack (1 Jan–21 Oct), Pareto zone ranking, hour × weekday load, after-hours load |
+| Daily patterns (A) | Cluster profiles per end use, kWh per cluster / zone / floor / end use (CSV), calendar and weather labels, k-selection table, scaling screen, atypical days |
+| Weather and AC (A) | Open-Meteo timeline, AC kWh vs weather, per-zone sensitivity (correlation only) |
+| Forecast accuracy (B) | Model decision on dev folds, final test with and without Floor 6, per-zone skill, actual vs predicted, weekly-block diagnostic |
+| Exceptions (B) | Hours outside the forecast's locked residual range: event rate, duration burden, exception list (CSV), range chart |
+| Data quality | Complete zone-days (57/60 and 60/60), days lost per zone and month, cited holiday list checked against building load |
+| Sensitivity (60/60) | Every result re-run with the strict rule |
 
 ## Methodology rules (defined once in `src/cubems/config.py`)
 
-- **Usable zone-day:** at least 95% of the day's 1,440 minutes have *every* power channel of the zone recorded.
-  Gap days are dropped and never filled with zeros.
-- **Energy:** hourly kWh = Σ valid minute kW / 60. A valid hour has ≥ 57 minutes.
-- **Scope:** Model 1 = 23 AC + lighting + plug zones (Floor 2 z1, z2, z4; Floors 3–7 z1, z2, z4, z5).
-  Model 2 = 8 lighting + plug zones (Floor 1 z1, z3; zone 3 on Floors 2–7). Floor 1 z2 and z4 are out of scope.
-- **Extreme readings:** any minute above 500 kW is flagged and kept. Test results with and without these days.
-- **Indoor temperature and RH:** context only, never used as clustering input.
-- **Weather:** Open-Meteo reanalysis for the site, joined on date and analysed against Model 1 zones only.
-  Treat any link as correlation, not cause. Cite *"Weather data by Open-Meteo.com"* (CC BY 4.0).
-- **Seasons:** whole months, Hot = Mar–May, Rainy = Jun–Oct, Cool = Nov–Feb.
-- **Floor 6** data ends on 22 Oct 2019 (the source file is truncated mid-row). Report it separately.
-
-The coverage numbers reproduce the proposal's scope table to within 0.2 percentage points.
+- **Minute:** valid for an end use only if every circuit of that end use has a reading.
+- **Hour:** valid with at least 57 of 60 valid minutes; kWh = mean kW × 1 h. Otherwise missing, never zero.
+  Zeros are kept. Every result is re-run with the strict 60/60 rule.
+- **Complete zone-day (Question A):** all 24 hours valid for every end use of the zone's group.
+- **Groups:** C1 = AC + lighting + plugs (24 zones, incl. F1z2); C2 = lighting + plugs (8: F1z1, F1z3, F2z3,
+  z3 on Floors 3–7); F1z4 = lighting only (kWh totals only).
+- **Period:** all of 2019. Floor 6 stops 22 Oct 13:27 (the source file is truncated mid-row). Floor comparisons
+  use 1 Jan–21 Oct, and the final test is reported with and without Floor 6.
+- **Holidays:** the cited official 2019 list in `references/thai_holidays_2019.csv`. Labour Day and the
+  Bangkok-only ASEAN Summit days are listed but not flagged, because the building ran normally.
+- **Timestamps:** treated as Bangkok local time (assumption; AC switches on 08:00, off 12–13, off 17:00).
+- **Indoor temperature and RH:** never model inputs (0% coverage Jan–Feb; no columns on Floor 1).
+- **Weather:** Open-Meteo (ERA5) day-level mean and max temperature, dew point, radiation and rainfall. These
+  are B inputs (standing in for a forecast, so accuracy is an upper bound) and A cluster labels for C1 only.
+  Correlation, not cause.
+- **Question B inputs:** zone, hour, day of week, holiday and weekend flags, AC at the same hour 1 and 7 days
+  earlier, yesterday's mean (missing lags stay missing, with indicators), day-D weather. No same-day readings,
+  no A labels.
+- **Decision rule:** boosting stays primary only if it beats Ridge on dev MAE **and** its |NMBE| ≤ 5%. Only one
+  model goes to the final test. Exception thresholds (residual P5–P95, 0.25 kWh margin, ≥ 2 h) are locked on
+  development residuals.
+- **Leakage checks (automated):** training dates precede test dates, encoders, scalers and fallback means are fit
+  on training rows only, every model is scored on identical targets, and predictions are finite and non-negative.
 
 ## Repo layout
 
 ```
 app/                 Streamlit dashboard (Home.py router + views/, common.py helpers)
-src/cubems/          config, loader, aggregate, weather, folds, anomaly
-scripts/             get_data.py (fetch + verify raw CSVs), build_dataset.py (raw -> processed)
+src/cubems/          config, loader, aggregate, calendar, weather, clustering (A), forecast (B), anomaly
+scripts/             get_data.py, build_dataset.py, run_question_a.py, run_question_b.py
+references/          thai_holidays_2019.csv (cited official holiday list)
 notebooks/           exploration (import from cubems; never re-implement rules)
 tests/               pytest
 data/{raw,interim,processed,external}/   gitignored
 models/, reports/figures/                gitignored outputs
 ```
 
-## Open decisions / next steps
+## Open items
 
-1. **2018 Jul–Dec as extra folds:** a methodology change, so the team needs to agree before using it (toggle on the Seasonal folds page).
-2. **Weather-aware expected-consumption model (X factor):** fit XGBoost per zone (or pooled with zone features) on
-   hour, day type and `wx_*` features using the within-season folds, then feed its prediction interval into
-   `cubems.anomaly.detect_episodes` in place of the empirical band.
-3. **K-means:** fix k per model using silhouette and seed stability, then lock the cluster-conditioned baseline.
-4. **Lock thresholds** (band percentiles, margin, minimum hours) before scoring the holdout, to avoid tuning on test data.
+1. **F1z2 forms its own C1 cluster at every k**, so no k passes rule 1 (≥ 3 zones per cluster). Its 24/7 profile
+   (AC highest at night) suggests a round-the-clock facility. Decide whether to keep it in C1 or report it separately.
+2. **Boosting's development advantage over the benchmark is small** (0.7% MAE; it loses in May, Jul and Aug, and is
+   slightly behind under the 60/60 rule). Its final-test skill is 6.8%. Report this honestly; don't tune on the final test.
+3. **Institution-specific closures:** 16 Sep has no complete data, and the building-wide exception days (21 Oct,
+   9 Sep, 30 Sep, Sat 14 Sep) should be checked against the university calendar.
+4. **Timestamp time zone** is inferred, not confirmed. The cause of the ERA5 hourly jumps is unknown.
+5. **Monotone constraints** (on lags and temperature) are an assumption. Document them in the report.
 
 ## Checks
 

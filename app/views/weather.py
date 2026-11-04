@@ -6,7 +6,7 @@ import streamlit as st
 from common import MUTED, SEASON_COLORS, card, load_weather_daily, load_zone_day, page_header, show, style, zone_key
 
 page_header("Weather and AC use",
-            "External weather (Open-Meteo) mapped to the 23 AC-metered zone-days. Regional reanalysis, not "
+            "External weather (Open-Meteo) mapped to the 24 AC-metered (C1) zone-days. Regional reanalysis, not "
             "measured at the building, so every link here is a correlation, not a cause.",
             eyebrow="Question A · external drivers")
 
@@ -15,7 +15,7 @@ if wx is None:
     st.warning("No weather data. Re-run `scripts/build_dataset.py` with internet access.")
     st.stop()
 zd = load_zone_day()
-m1 = zd[(zd["group"] == "Model 1") & zd["usable"]].copy()
+m1 = zd[(zd["group"] == "C1") & zd["usable"]].copy()
 
 FEATURES = {
     "wx_work_temp_mean": ("Mean temperature 08–18h", "°C"),
@@ -50,7 +50,7 @@ day_type = f2.segmented_control("Day type", ["Workday", "Weekend/holiday"], defa
 years = f3.segmented_control("Year", [2018, 2019], selection_mode="multi", default=[2019]) or [2019]
 s = m1[(m1["day_type"] == day_type) & m1["year"].isin(years)].dropna(subset=[feat, "ac_kwh"])
 zones = sorted(s["zone_id"].unique(), key=zone_key)
-zone = f4.selectbox("Zone", ["All Model 1 zones (mean per zone)"] + zones)
+zone = f4.selectbox("Zone", ["All C1 zones (mean per zone)"] + zones)
 label, unit = FEATURES[feat]
 
 if zone.startswith("All"):

@@ -1,3 +1,4 @@
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -17,12 +18,13 @@ from common import (
     usable_note,
 )
 
+from cubems import config
+
 page_header("Where the electricity goes",
             "What drives consumption, and how does its composition vary across floors, end uses and "
             "recurring operating patterns?", eyebrow="Question A · descriptive")
 
 zd = load_zone_day()
-zd = zd[zd["group"] != "Out of scope"]
 
 f1, f2, f3 = st.columns([3, 2, 2])
 months = f1.select_slider("Months (2019)", options=list(range(1, 13)), value=(1, 12),
@@ -48,13 +50,15 @@ for i, u in enumerate(uses, start=1):
     k[i].metric(f"{USE_LABELS[names[u]]} share", f"{tot_all[u] / tot_all.sum():.0%}", border=True)
 
 # ---------------------------------------------------------------- composition by floor
-fl = d.groupby("floor")[uses].sum().div(1000).rename(columns=names)
+dfl = d[d["date"] <= pd.Timestamp(config.FLOOR_COMPARE_END)]
+fl = dfl.groupby("floor")[uses].sum().div(1000).rename(columns=names)
 top_floor = fl.sum(axis=1).idxmax()
-ac_floor = (fl["AC"] / fl.sum(axis=1)).drop(1, errors="ignore")
-with card("Electricity composition by floor",
+ac_floor = fl["AC"] / fl.sum(axis=1)
+with card("Electricity composition by floor (1 Jan – 21 Oct)",
           f"Floor {top_floor} records the most electricity ({fl.sum(axis=1).max():,.0f} MWh). "
-          f"AC is {ac_floor.min():.0%}–{ac_floor.max():.0%} of each AC floor's total.",
-          "Floor 1 holds lighting and plug zones 1 and 3 only (Model 2); its AC zone is out of scope."):
+          f"AC is {ac_floor.min():.0%}–{ac_floor.max():.0%} of each floor's total.",
+          f"1 Jan – {pd.Timestamp(config.FLOOR_COMPARE_END):%d %b} (Floor 6's last full day). F1Z4 (lighting only) "
+          "is in the totals; F1Z2 is Floor 1's only AC zone."):
     fig = go.Figure()
     for use in ["AC", "Light", "Plug"]:
         fig.add_bar(y=[f"Floor {f}" for f in fl.index], x=fl[use], name=USE_LABELS[use], orientation="h",
@@ -80,7 +84,7 @@ n80 = int((z["cum_share"] < 0.8).sum() + 1)
 with card("Priority ranking: which zones carry the load",
           f"**{n80} of {len(z)} zones** account for 80% of recorded {use_sel.lower()} electricity. "
           f"Start with {', '.join(z.index[:3])}.",
-          "kWh per usable day normalises zones with different coverage, so Floor 6 is not under-ranked "
+          "kWh per complete day normalises zones with different coverage, so Floor 6 is not under-ranked "
           "just for having fewer days."):
     c1, c2 = st.columns([1, 1])
     with c1:

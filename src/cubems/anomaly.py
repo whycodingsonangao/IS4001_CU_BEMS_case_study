@@ -1,9 +1,8 @@
-"""Question B: empirical baseline bands, sustained-episode detection and KPIs.
+"""Exception layer on top of the Question B forecast.
 
-This is the *preliminary* method from the proposal (historical 5th-95th percentile band
-per zone x hour x day-type, candidate = sustained departure). The weather-aware
-expected-consumption model suggested in feedback should replace the band's centre
-later; ``detect_episodes`` works on any (observed, lo, hi) triple, so it can be reused.
+An exception is a sustained run of hours where actual AC use falls outside the forecast's expected
+range (prediction + locked development-residual quantiles), i.e. "unusual given the weather and recent
+history". Candidates for a person to check, not confirmed faults.
 """
 
 from __future__ import annotations
@@ -11,60 +10,21 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from . import config
 
+def detect_episodes(scored: pd.DataFrame, margin_kw: float = 0.25, min_hours: int = 2,
+                    value: str = "kw") -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Flag hours outside [lo - margin, hi + margin]; group consecutive flagged hours per zone.
 
-def hourly_kw(hourly: pd.DataFrame, zone_day: pd.DataFrame, use: str = "ac") -> pd.DataFrame:
-    """Hourly mean kW for valid hours on usable zone-days only."""
-    h = hourly[["floor", "zone", "timestamp", f"{use}_kwh", f"{use}_minutes", "joint_minutes"]]
-    h = h.dropna(subset=[f"{use}_kwh"]).copy()
-    h = h[(h[f"{use}_minutes"] >= config.MIN_HOUR_MINUTES)
-          & (h["joint_minutes"] >= config.MIN_HOUR_MINUTES)]
-    h["kw"] = h[f"{use}_kwh"] * 60.0 / h[f"{use}_minutes"]
-    h["date"] = h["timestamp"].dt.normalize()
-    h["hour"] = h["timestamp"].dt.hour
-    meta = zone_day.loc[zone_day["usable"], ["floor", "zone", "date", "day_type", "window",
-                                              "coverage"]]
-    return h.merge(meta, on=["floor", "zone", "date"], how="inner")
-
-
-def baseline_bands(
-    hkw: pd.DataFrame,
-    start: str = config.QB_BASELINE[0],
-    end: str = config.QB_BASELINE[1],
-    q: tuple[float, float] = (0.05, 0.95),
-    min_days: int = 10,
-    by: tuple[str, ...] = ("floor", "zone", "day_type", "hour"),
-) -> pd.DataFrame:
-    base = hkw[hkw["date"].between(pd.Timestamp(start), pd.Timestamp(end))]
-    g = base.groupby(list(by))["kw"]
-    bands = pd.DataFrame({
-        "lo": g.quantile(q[0]),
-        "median": g.median(),
-        "hi": g.quantile(q[1]),
-        "n_days": g.size(),
-    }).reset_index()
-    return bands[bands["n_days"] >= min_days]
-
-
-def detect_episodes(
-    scored: pd.DataFrame,
-    margin_kw: float = 0.25,
-    min_hours: int = 2,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Flag hours outside [lo - margin, hi + margin]; group consecutive flagged hours.
-
-    ``scored`` needs columns floor, zone, timestamp, kw, lo, hi, coverage.
-    Returns (scored with ``departure``/``flag``, episodes table).
+    ``scored`` needs floor, zone, timestamp, lo, hi and the ``value`` column (hourly kWh = mean kW).
     """
     s = scored.sort_values(["floor", "zone", "timestamp"]).copy()
-    above = s["kw"] - (s["hi"] + margin_kw)
-    below = (s["lo"] - margin_kw) - s["kw"]
+    v = s[value]
+    above = v - (s["hi"] + margin_kw)
+    below = (s["lo"] - margin_kw) - v
     s["departure"] = np.where(above > 0, above, np.where(below > 0, -below, 0.0))
     s["flag"] = s["departure"] != 0
     s["direction"] = np.sign(s["departure"])
 
-    # new run whenever zone changes, flag/direction changes or an hour is skipped
     key = s["floor"].astype(str) + "-" + s["zone"].astype(str)
     gap = s["timestamp"].diff() != pd.Timedelta(hours=1)
     brk = (key != key.shift()) | gap | (s["direction"] != s["direction"].shift())
@@ -72,19 +32,16 @@ def detect_episodes(
 
     f = s[s["flag"]]
     ep = f.groupby("run").agg(
-        floor=("floor", "first"),
-        zone=("zone", "first"),
-        start=("timestamp", "min"),
-        end=("timestamp", "max"),
+        floor=("floor", "first"), zone=("zone", "first"),
+        start=("timestamp", "min"), end=("timestamp", "max"),
         duration_h=("timestamp", "size"),
         peak_departure_kw=("departure", lambda x: x.abs().max()),
         mean_departure_kw=("departure", lambda x: x.abs().mean()),
         direction=("direction", "first"),
-        min_coverage=("coverage", "min"),
     )
     ep = ep[ep["duration_h"] >= min_hours].reset_index(drop=True)
     ep["end"] = ep["end"] + pd.Timedelta(hours=1)
-    ep["direction"] = ep["direction"].map({1.0: "Above normal", -1.0: "Below normal"})
+    ep["direction"] = ep["direction"].map({1.0: "Above expected", -1.0: "Below expected"})
     ep["zone_id"] = "F" + ep["floor"].astype(str) + "Z" + ep["zone"].astype(str)
     ep = ep.sort_values(["duration_h", "peak_departure_kw"], ascending=False)
     return s, ep
