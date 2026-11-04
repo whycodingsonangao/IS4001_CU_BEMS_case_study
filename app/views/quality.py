@@ -6,6 +6,7 @@ from common import (
     FLAG_COLOR,
     MONTHS,
     SEQ_BLUE,
+    build_panel,
     card,
     heat_text,
     load_hourly,
@@ -140,3 +141,8 @@ with st.expander("Zone registry"):
     st.dataframe(load_zones(), hide_index=True, width="stretch", column_config={
         "zone_id": "Zone", "group": "Group", "n_ac_units": "AC units", "has_ac": "Has AC",
         "has_env": "Indoor sensors", "channels": "Power channels"})
+
+with st.expander("Rebuild data and results", icon=":material/refresh:"):
+    st.caption("Re-runs scripts/run_all.py: fetch/verify raw data, rebuild tables, Question A and Question B. "
+               "Use this after pulling code changes. Valid raw files are not re-downloaded.")
+    build_panel(key="rebuild")

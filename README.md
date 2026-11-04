@@ -31,19 +31,24 @@ pip install -r requirements.txt     # also installs the local `cubems` package i
 
 macOS/Linux: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.
 
-## Build everything (one command)
+## Build and open everything (one command)
+
+Pick either. Both run the same pipeline (fetch data → processed tables → Question A → Question B; ~2 min, plus a
+one-time ~150 MB download):
 
 ```powershell
-python scripts/run_all.py      # fetch data -> processed tables -> Question A -> Question B  (~2 min + first-run download)
-streamlit run app/Home.py      # then open http://localhost:8501
+streamlit run app/Home.py              # on a fresh clone the dashboard shows a "Build everything now" button
+python scripts/run_all.py --serve      # or build in the terminal, then open the dashboard automatically
 ```
 
-`run_all.py` runs the four steps below in order and stops at the first failure. It's safe to re-run: valid raw files
+Use the Rebuild panel at the bottom of **Data quality** after pulling code changes. The terminal equivalent is
+`python scripts/run_all.py`. `run_all.py` stops at the first failure and is safe to re-run, because valid raw files
 are skipped. Options:
 
+- `--serve` opens the dashboard when the build finishes. `--skip-build` opens it without rebuilding.
 - `--from "C:\path\to\folder"` copies the raw CSVs from a folder you already have instead of downloading them.
 - `--quick` runs the main 57/60 rule only, skipping the 60/60 sensitivity run and the diagnostic (about half the time).
-- `--no-weather` works offline but skips Question B, which needs the weather features.
+- `--no-weather` works offline, but skips Question B, which needs the weather features.
 
 ## Data
 

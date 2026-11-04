@@ -47,6 +47,7 @@ page_header("Where to Look First",
             "predicted a day ahead, and which zones then behave unexpectedly.",
             eyebrow="CU-BEMS case study · Group 7")
 
+load_zone_day()  # shows the build panel (outside the cache) if nothing is built yet
 H = headlines()
 c = st.columns(4)
 c[0].metric("Recorded electricity, 2019", f"{H['mwh']:,.0f} MWh", border=True, help="Complete zone-days, all 33 zones")

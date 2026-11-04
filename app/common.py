@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -52,32 +55,76 @@ def apply_style() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------- loaders
+# ---------------------------------------------------------------- build from the dashboard
+def build_panel(reason: str | None = None, key: str = "build") -> None:
+    """Run scripts/run_all.py from the dashboard, streaming its log, then reload."""
+    if reason:
+        st.info(reason, icon=":material/build:")
+    c1, c2 = st.columns([1, 3])
+    quick = c2.toggle("Quick build (main 57/60 rule only)", value=False, key=f"{key}_quick",
+                      help="Skips the 60/60 sensitivity run and the weekly-block diagnostic (about half the time).")
+    if not c1.button("Build everything now", type="primary", icon=":material/play_arrow:", key=f"{key}_btn"):
+        return
+    cmd = [sys.executable, "-u", str(config.ROOT / "scripts" / "run_all.py"), *(["--quick"] if quick else [])]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONWARNINGS": "ignore"}
+    lines: list[str] = []
+    with st.status("Building data and results (first run also downloads ~150 MB)...", expanded=True) as status:
+        log = st.empty()
+        proc = subprocess.Popen(cmd, cwd=config.ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, encoding="utf-8", errors="replace", env=env)
+        for line in proc.stdout:  # type: ignore[union-attr]
+            lines.append(line.rstrip())
+            log.code("\n".join(lines[-30:]), language=None)
+        rc = proc.wait()
+        if rc != 0:
+            status.update(label=f"Build failed (exit {rc}). See the log above.", state="error")
+            st.stop()
+        status.update(label="Build finished. Reloading...", state="complete")
+    st.cache_data.clear()
+    st.rerun()
+
+
 def missing_data_stop() -> None:
-    st.error("Processed data not found. From the repo root run:\n\n"
-             "```\n.venv\\Scripts\\python scripts\\build_dataset.py\n```")
+    st.title("Where to Look First")
+    build_panel("The processed data and results aren't built yet on this machine. Build them here (about 2 minutes, "
+                "plus a one-time ~150 MB download), or run `python scripts/run_all.py` in a terminal.", key="missing")
     st.stop()
 
 
-@st.cache_data(show_spinner="Loading zone-day table...")
-def load_zone_day() -> pd.DataFrame:
-    if not config.ZONE_DAY_PATH.exists():
+# ---------------------------------------------------------------- loaders
+def _require(path: Path) -> None:
+    if not path.exists():
         missing_data_stop()
+
+
+@st.cache_data(show_spinner="Loading zone-day table...")
+def _load_zone_day() -> pd.DataFrame:
     return pd.read_parquet(config.ZONE_DAY_PATH)
 
 
+def load_zone_day() -> pd.DataFrame:
+    _require(config.ZONE_DAY_PATH)
+    return _load_zone_day()
+
+
 @st.cache_data(show_spinner="Loading hourly table...")
-def load_hourly() -> pd.DataFrame:
-    if not config.HOURLY_PATH.exists():
-        missing_data_stop()
+def _load_hourly() -> pd.DataFrame:
     return pd.read_parquet(config.HOURLY_PATH)
 
 
+def load_hourly() -> pd.DataFrame:
+    _require(config.HOURLY_PATH)
+    return _load_hourly()
+
+
 @st.cache_data
-def load_zones() -> pd.DataFrame:
-    if not config.ZONES_PATH.exists():
-        missing_data_stop()
+def _load_zones() -> pd.DataFrame:
     return pd.read_parquet(config.ZONES_PATH)
+
+
+def load_zones() -> pd.DataFrame:
+    _require(config.ZONES_PATH)
+    return _load_zones()
 
 
 @st.cache_data
@@ -111,8 +158,8 @@ def load_qb_decision(strict: bool = False) -> dict | None:
 
 def need(obj, script: str):
     if obj is None:
-        cmd = rf".venv\Scripts\python scripts\{script}"
-        st.warning(f"Results not built yet. From the repo root run:\n\n```\n{cmd}\n```")
+        build_panel(f"These results aren't built yet. Build everything here, or run `python scripts/{script}` "
+                    "(or `python scripts/run_all.py`) in a terminal.", key=f"need_{script}")
         st.stop()
     return obj
 
