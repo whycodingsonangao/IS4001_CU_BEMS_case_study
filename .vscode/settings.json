@@ -1,0 +1,7 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": ["src", "app"],
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+  "[python]": { "editor.defaultFormatter": "charliermarsh.ruff" },
+  "files.exclude": { "**/__pycache__": true, ".ruff_cache": true }
+}

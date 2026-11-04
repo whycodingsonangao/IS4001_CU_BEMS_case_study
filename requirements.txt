@@ -1,0 +1,19 @@
+# Pinned versions this project was built and tested with (Python 3.13, Windows).
+# Install with:  pip install -r requirements.txt   (also installs the local `cubems` package)
+numpy==2.5.4
+pandas==3.1.0
+pyarrow==26.0.1
+scikit-learn==1.9.1
+xgboost==3.4.1
+requests==2.34.2
+holidays==0.108
+plotly==7.1.0
+streamlit==1.66.1
+# notebooks / dev
+jupyterlab==4.6.5
+ipykernel==7.4.0
+matplotlib==3.11.2
+seaborn==0.13.2
+ruff==0.17.3
+pytest==9.2.0
+-e .

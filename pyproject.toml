@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cubems"
+version = "0.1.0"
+description = "IS4001 Group 7 - CU-BEMS case study: energy priorities and zone exceptions"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pyarrow>=16",
+    "scikit-learn>=1.5",
+    "xgboost>=2.1",
+    "requests>=2.31",
+    "holidays>=0.50",
+    "plotly>=5.22",
+    "streamlit>=1.40",
+]
+
+[project.optional-dependencies]
+dev = ["jupyterlab>=4", "ipykernel>=6", "matplotlib>=3.8", "seaborn>=0.13", "ruff>=0.5", "pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
