@@ -31,10 +31,24 @@ pip install -r requirements.txt     # also installs the local `cubems` package i
 
 macOS/Linux: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.
 
+## Build everything (one command)
+
+```powershell
+python scripts/run_all.py      # fetch data -> processed tables -> Question A -> Question B  (~2 min + first-run download)
+streamlit run app/Home.py      # then open http://localhost:8501
+```
+
+`run_all.py` runs the four steps below in order and stops at the first failure. It's safe to re-run: valid raw files
+are skipped. Options:
+
+- `--from "C:\path\to\folder"` copies the raw CSVs from a folder you already have instead of downloading them.
+- `--quick` runs the main 57/60 rule only, skipping the 60/60 sensitivity run and the diagnostic (about half the time).
+- `--no-weather` works offline but skips Question B, which needs the weather features.
+
 ## Data
 
-The raw data (14 CSVs, ~700 MB) is **not** in this repo, and neither is anything derived from it.
-Every teammate fetches and builds it locally with two commands (venv active):
+The raw data (14 CSVs, ~700 MB) is **not** in this repo, and neither is anything derived from it. `run_all.py`
+handles it, or you can run the two data steps yourself (venv active):
 
 ```powershell
 python scripts/get_data.py        # downloads the 14 CSVs from the authors' site into data/raw/ and checks them
@@ -57,11 +71,11 @@ that are already valid, so re-running it is safe.
 | `data/processed/zones.parquet` | zone | Group (C1 / C2 / Lighting only), AC unit count, sensors |
 | `data/processed/weather_daily.parquet` | day | Mean/max/min temperature, RH, dew point, radiation, cooling degree-hours |
 
-## Run the analysis
+## Run the analysis (individual steps)
 
 ```powershell
 python scripts/run_question_a.py   # ~30 s: k-means for C1 and C2, main + strict 60/60 run -> data/processed/qa*/
-python scripts/run_question_b.py   # ~3 min: dev folds, model decision, final test, exceptions -> data/processed/qb*/
+python scripts/run_question_b.py   # ~1-3 min: dev folds, model decision, final test, exceptions -> data/processed/qb*/
 ```
 
 Both scripts run the main 57/60 rule, then the strict 60/60 sensitivity run (`--main-only` skips it).
@@ -114,7 +128,7 @@ streamlit run app/Home.py     # opens http://localhost:8501 (light/dark follows 
 ```
 app/                 Streamlit dashboard (Home.py router + views/, common.py helpers)
 src/cubems/          config, loader, aggregate, calendar, weather, clustering (A), forecast (B), anomaly
-scripts/             get_data.py, build_dataset.py, run_question_a.py, run_question_b.py
+scripts/             run_all.py (everything), get_data.py, build_dataset.py, run_question_a.py, run_question_b.py
 references/          thai_holidays_2019.csv (cited official holiday list)
 notebooks/           exploration (import from cubems; never re-implement rules)
 tests/               pytest
