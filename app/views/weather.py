@@ -28,10 +28,26 @@ FEATURES = {
     "wx_radiation_kwh_m2": ("Solar radiation", "kWh/m²"),
 }
 
+# ---------------------------------------------------------------- shared filters
+f1, f2, _ = st.columns([3, 3, 6], gap="small")
+day_types = f1.segmented_control(
+    "Day type", ["Workday", "Weekend/holiday"], selection_mode="multi",
+    default=["Workday", "Weekend/holiday"],
+) or ["Workday", "Weekend/holiday"]
+years = f2.segmented_control("Year", [2018, 2019], selection_mode="multi", default=[2019]) or [2019]
+
+selected_dates = pd.to_datetime(
+    m1.loc[m1["day_type"].isin(day_types) & m1["year"].isin(years), "date"]
+).dt.normalize().drop_duplicates()
+weather_dates = pd.to_datetime(wx["date"]).dt.normalize()
+w = wx[weather_dates.isin(selected_dates)].copy()
+if w.empty:
+    st.warning("No weather data for this filter.")
+    st.stop()
+
 # ---------------------------------------------------------------- weather timeline
-w = wx.copy()
 hot = w.loc[w["temp_max"].idxmax()]
-with card("Outdoor temperature, Jul 2018 – Dec 2019",
+with card(f"Outdoor temperature, {w['date'].min():%d %b %Y} – {w['date'].max():%d %b %Y}",
           f"The hot season peaks in April–May; the warmest day reached {hot['temp_max']:.1f} °C on "
           f"{hot['date']:%d %b %Y}."):
     fig = go.Figure()
@@ -44,13 +60,11 @@ with card("Outdoor temperature, Jul 2018 – Dec 2019",
     show(style(fig, height=260))
 
 # ---------------------------------------------------------------- AC vs weather
-f1, f2, f3, f4 = st.columns([3, 3, 2, 3])
+f1, f2, _ = st.columns([3, 3, 6], gap="small")
 feat = f1.selectbox("Weather feature", list(FEATURES), format_func=lambda f: FEATURES[f][0])
-day_type = f2.segmented_control("Day type", ["Workday", "Weekend/holiday"], default="Workday") or "Workday"
-years = f3.segmented_control("Year", [2018, 2019], selection_mode="multi", default=[2019]) or [2019]
-s = m1[(m1["day_type"] == day_type) & m1["year"].isin(years)].dropna(subset=[feat, "ac_kwh"])
+s = m1[m1["day_type"].isin(day_types) & m1["year"].isin(years)].dropna(subset=[feat, "ac_kwh"])
 zones = sorted(s["zone_id"].unique(), key=zone_key)
-zone = f4.selectbox("Zone", ["All C1 zones (mean per zone)"] + zones)
+zone = f2.selectbox("Zone", ["All C1 zones (mean per zone)"] + zones)
 label, unit = FEATURES[feat]
 
 if zone.startswith("All"):

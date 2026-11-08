@@ -137,7 +137,7 @@ with priorities_tab:
 with operations_tab:
     h = load_hourly()
     with card("Recurring operating pattern: average load by hour and weekday") as _:
-        c1, c2 = st.columns([1.5, 4])
+        c1, c2 = st.columns([2.2, 5.3])
         use_h = c1.segmented_control("End use", ["AC", "Light", "Plug"], default="AC", key="heat_use") or "AC"
         floors = c1.pills("Floors", list(range(1, 8)), selection_mode="multi", default=list(range(1, 8)),
                           format_func=lambda f: f"F{f}") or []
