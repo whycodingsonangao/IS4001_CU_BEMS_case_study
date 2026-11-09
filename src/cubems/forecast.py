@@ -157,7 +157,8 @@ def predict_ridge(model, test: pd.DataFrame) -> tuple[np.ndarray, float]:
 # ---------------------------------------------------------------- metrics
 def metrics(y: np.ndarray, p: np.ndarray) -> dict:
     e = p - y
-    return {"mae": float(np.abs(e).mean()), "rmse": float(np.sqrt((e ** 2).mean())),
+    rmse = float(np.sqrt((e ** 2).mean()))
+    return {"mae": float(np.abs(e).mean()), "rmse": rmse, "cvrmse": 100 * rmse / float(y.mean()),
             "nmbe": float(100 * e.sum() / y.sum()), "n": int(len(y))}
 
 

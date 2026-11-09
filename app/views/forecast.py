@@ -17,6 +17,27 @@ chosen = dec["chosen"]
 LBL = {"benchmark": "Same hour, 7 days earlier", "boosting": "Gradient boosting (Poisson, monotone)",
        "ridge": "Ridge (floored at 0)"}
 
+if "cvrmse" not in metrics.columns:
+    metrics = metrics.copy()
+    pred_dates = pd.to_datetime(pred["date"])
+
+    def mean_actual(subset: str) -> float:
+        if subset.startswith("development"):
+            selected = pred[pred["stage"] == "development"]
+            if subset != "development":
+                month = subset.removeprefix("development ")
+                selected = selected[pred_dates.loc[selected.index].dt.strftime("%Y-%m") == month]
+        elif subset == "final (excl. Floor 6)":
+            selected = pred[(pred["stage"] == "final") & (pred["floor"] != 6)]
+        else:
+            selected = pred[pred["stage"] == "final"]
+        return float(selected["y"].mean())
+
+    metrics["cvrmse"] = [
+        100 * rmse / mean_actual(subset)
+        for subset, rmse in zip(metrics["subset"], metrics["rmse"])
+    ]
+
 fin = metrics[(metrics["subset"] == "final (all floors)") & (metrics["model"] == chosen)].iloc[0]
 fin_b = metrics[(metrics["subset"] == "final (all floors)") & (metrics["model"] == "benchmark")].iloc[0]
 c = st.columns(4)
@@ -40,11 +61,11 @@ with card("Model decision on the development folds (May–Aug, expanding window,
     t = metrics[metrics["subset"].str.startswith("development")].copy()
     t["model"] = t["model"].map(LBL)
     t["skill_vs_benchmark"] = 100 * t["skill_vs_benchmark"]
-    st.dataframe(t[["subset", "model", "mae", "rmse", "nmbe", "skill_vs_benchmark", "zone_day_mae",
+    st.dataframe(t[["subset", "model", "mae", "cvrmse", "nmbe", "skill_vs_benchmark", "zone_day_mae",
                     "building_hour_mae", "n"]], hide_index=True, width="stretch", height=300, column_config={
         "subset": "Fold", "model": "Model",
         "mae": st.column_config.NumberColumn("MAE", format="%.3f"),
-        "rmse": st.column_config.NumberColumn("RMSE", format="%.3f"),
+        "cvrmse": st.column_config.NumberColumn("CV(RMSE) %", format="%.1f%%"),
         "nmbe": st.column_config.NumberColumn("NMBE %", format="%+.1f"),
         "skill_vs_benchmark": st.column_config.NumberColumn("Skill vs bench.", format="%+.1f%%"),
         "zone_day_mae": st.column_config.NumberColumn("Zone-day MAE", format="%.1f"),
@@ -55,11 +76,11 @@ with card("Final test (Sep–Dec, frozen model choice)", "Reported with and with
     t = metrics[metrics["subset"].str.startswith("final")].copy()
     t["model"] = t["model"].map(LBL)
     t["skill_vs_benchmark"] = 100 * t["skill_vs_benchmark"]
-    st.dataframe(t[["subset", "model", "mae", "rmse", "nmbe", "skill_vs_benchmark", "zone_day_mae",
+    st.dataframe(t[["subset", "model", "mae", "cvrmse", "nmbe", "skill_vs_benchmark", "zone_day_mae",
                     "building_hour_mae", "n"]], hide_index=True, width="stretch", column_config={
         "subset": "Subset", "model": "Model",
         "mae": st.column_config.NumberColumn("MAE", format="%.3f"),
-        "rmse": st.column_config.NumberColumn("RMSE", format="%.3f"),
+        "cvrmse": st.column_config.NumberColumn("CV(RMSE) %", format="%.1f%%"),
         "nmbe": st.column_config.NumberColumn("NMBE %", format="%+.1f"),
         "skill_vs_benchmark": st.column_config.NumberColumn("Skill vs bench.", format="%+.1f%%"),
         "zone_day_mae": st.column_config.NumberColumn("Zone-day MAE", format="%.1f"),
