@@ -31,7 +31,6 @@ EMPHASIS = "#2a78d6"
 DEEMPH = "#b7d3f6"
 MUTED = "#898781"
 BAND_FILL = "rgba(137,135,129,0.22)"
-EPISODE_FILL = "rgba(237,161,0,0.16)"
 FLAG_COLOR = "#d03b3b"  # status: critical (always paired with a label)
 GRID = "rgba(137,135,129,0.22)"
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]

@@ -1,18 +1,21 @@
-# Where to Look First: Energy Priorities and Zone Exceptions
+# Where to Look First: Energy and Next-Day AC Priorities
 
 **IS4001 Group 7 · CU-BEMS case study.** We show facilities managers where the building's electricity goes
-(Question A), how well each zone's AC use can be predicted a day ahead (Question B), and which zones then
-behave unexpectedly (the exception layer on top of B). The design follows the team's methodology plan.
+(Question A), which AC zones merit attention tomorrow (Question B), and which completed days
+behaved unexpectedly (the retrospective review layer).
 
 | | A: descriptive | B: predictive |
 |---|---|---|
-| Asks | Which daily electricity patterns recur, and how much kWh does each account for? | How well can each zone's hourly AC use for the next day be predicted? |
-| Unit | Zone-day | Zone-hour |
-| Method | k-means on 24 hourly kWh per end use (C1: 72, C2: 48 features), 95th-percentile scaling | Same-hour-last-week benchmark vs Poisson gradient boosting (monotone) vs Ridge |
+| Asks | Which daily electricity patterns recur, and how much kWh does each account for? | Which AC zones should a facility manager review tomorrow? |
+| Unit | Zone-day | Complete AC zone-day |
+| Method | k-means on 24 hourly kWh per end use (C1: 72, C2: 48 features), 95th-percentile scaling | Same-zone daily total seven days earlier vs Poisson gradient boosting vs Ridge |
 | Evaluation | k in 3–8: size rule → half-year ARI ≥ 0.8 → silhouette → interpretability; Ward cross-check | Chronological expanding window, monthly refit: dev May–Aug, final test Sep–Dec |
-| KPIs | kWh per cluster, zone, floor and end use | MAE (primary), RMSE, NMBE, skill vs benchmark; exception event rate and duration burden |
+| KPIs | kWh per cluster, zone, floor and end use | Zone-day MAE, skill vs benchmark and recall@5 for the five highest-use zones (primary); RMSE, CV(RMSE), NMBE (secondary); daily exception rate |
 
 A's cluster labels are never inputs to B.
+
+The complete Question B method, evaluation and facility use case are documented in
+[Question B: next-day AC zone priorities](local_daily_forecast/README.md).
 
 ## Stack
 
@@ -84,7 +87,7 @@ python scripts/run_question_b.py   # ~1-3 min: dev folds, model decision, final 
 ```
 
 Both scripts run the main 57/60 rule, then the strict 60/60 sensitivity run (`--main-only` skips it).
-Question B also runs the weekly-block CV diagnostic once (`--skip-diagnostic` skips it).
+Question B also runs a weekly-block cross-validation diagnostic once (`--skip-diagnostic` skips it).
 
 ## Run the dashboard
 
@@ -97,8 +100,8 @@ streamlit run app/Home.py     # opens http://localhost:8501 (light/dark follows 
 | Energy composition (A) | Floor × end-use stack (1 Jan–21 Oct), Pareto zone ranking, hour × weekday load, after-hours load |
 | Daily patterns (A) | Cluster profiles per end use, kWh per cluster / zone / floor / end use (CSV), calendar and weather labels, k-selection table, scaling screen, atypical days |
 | Weather and AC (A) | Open-Meteo timeline, AC kWh vs weather, per-zone sensitivity (correlation only) |
-| Forecast accuracy (B) | Model decision on dev folds, final test with and without Floor 6, per-zone skill, actual vs predicted, weekly-block diagnostic |
-| Exceptions (B) | Hours outside the forecast's locked residual range: event rate, duration burden, exception list (CSV), range chart |
+| Next-day priorities (B) | Zone priority list, model decision on dev folds, final test with and without Floor 6, per-zone skill, actual vs predicted daily totals |
+| Daily deviations (B) | Complete days outside each zone's locked expected daily range, exception rate and list (CSV) |
 | Data quality | Complete zone-days (57/60 and 60/60), days lost per zone and month, cited holiday list checked against building load |
 | Sensitivity (60/60) | Every result re-run with the strict rule |
 
@@ -108,6 +111,8 @@ streamlit run app/Home.py     # opens http://localhost:8501 (light/dark follows 
 - **Hour:** valid with at least 57 of 60 valid minutes; kWh = mean kW × 1 h. Otherwise missing, never zero.
   Zeros are kept. Every result is re-run with the strict 60/60 rule.
 - **Complete zone-day (Question A):** all 24 hours valid for every end use of the zone's group.
+- **Complete AC zone-day (Question B):** all 24 AC hours valid; the target is their summed kWh. Missing days are
+  excluded from scoring and never treated as zero.
 - **Groups:** C1 = AC + lighting + plugs (24 zones, incl. F1z2); C2 = lighting + plugs (8: F1z1, F1z3, F2z3,
   z3 on Floors 3–7); F1z4 = lighting only (kWh totals only).
 - **Period:** all of 2019. Floor 6 stops 22 Oct 13:27 (the source file is truncated mid-row). Floor comparisons
@@ -116,15 +121,13 @@ streamlit run app/Home.py     # opens http://localhost:8501 (light/dark follows 
   Bangkok-only ASEAN Summit days are listed but not flagged, because the building ran normally.
 - **Timestamps:** treated as Bangkok local time (assumption; AC switches on 08:00, off 12–13, off 17:00).
 - **Indoor temperature and RH:** never model inputs (0% coverage Jan–Feb; no columns on Floor 1).
-- **Weather:** Open-Meteo (ERA5) day-level mean and max temperature, dew point, radiation and rainfall. These
-  are B inputs (standing in for a forecast, so accuracy is an upper bound) and A cluster labels for C1 only.
-  Correlation, not cause.
-- **Question B inputs:** zone, hour, day of week, holiday and weekend flags, AC at the same hour 1 and 7 days
-  earlier, yesterday's mean (missing lags stay missing, with indicators), day-D weather. No same-day readings,
-  no A labels.
+- **Weather:** Open-Meteo (ERA5) daily summaries label Question A clusters and enter Question B only with a
+  one-day lag. Day-D observed weather is never a next-day forecast input.
+- **Question B inputs:** zone, day of week, holiday and weekend flags, complete AC daily totals 1 and 7 days
+  earlier, a previous-seven-day mean (with missing indicators), and prior-day weather. No day-D readings or A labels.
 - **Decision rule:** boosting stays primary only if it beats Ridge on dev MAE **and** its |NMBE| ≤ 5%. Only one
-  model goes to the final test. Exception thresholds (residual P5–P95, 0.25 kWh margin, ≥ 2 h) are locked on
-  development residuals.
+  model goes to the final test. Daily exception ranges (zone × day type residual P5–P95) are locked on
+  development residuals and used only after actual daily use is known.
 - **Leakage checks (automated):** training dates precede test dates, encoders, scalers and fallback means are fit
   on training rows only, every model is scored on identical targets, and predictions are finite and non-negative.
 
@@ -145,12 +148,11 @@ models/, reports/figures/                gitignored outputs
 
 1. **F1z2 forms its own C1 cluster at every k**, so no k passes rule 1 (≥ 3 zones per cluster). Its 24/7 profile
    (AC highest at night) suggests a round-the-clock facility. Decide whether to keep it in C1 or report it separately.
-2. **Boosting's development advantage over the benchmark is small** (0.7% MAE; it loses in May, Jul and Aug, and is
-   slightly behind under the 60/60 rule). Its final-test skill is 6.8%. Report this honestly; don't tune on the final test.
-3. **Institution-specific closures:** 16 Sep has no complete data, and the building-wide exception days (21 Oct,
-   9 Sep, 30 Sep, Sat 14 Sep) should be checked against the university calendar.
+2. **Next-day priority is not an automatic fault diagnosis.** A high forecast may reflect normal operations; use
+   the priority list to decide what to review. Exception flags are available only after the target day ends.
+3. **Institution-specific closures:** compare widespread daily deviations with the university calendar.
 4. **Timestamp time zone** is inferred, not confirmed. The cause of the ERA5 hourly jumps is unknown.
-5. **Monotone constraints** (on lags and temperature) are an assumption. Document them in the report.
+5. **Monotone constraints** on past AC totals are an assumption. Document them in the report.
 
 ## Checks
 

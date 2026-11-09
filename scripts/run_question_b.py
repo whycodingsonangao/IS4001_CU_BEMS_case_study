@@ -1,11 +1,11 @@
-"""Question B: day-ahead AC prediction, model decision, final test and the exception layer.
+"""Question B: next-day zone AC totals, model decision, final test and daily review flags.
 
     python scripts/run_question_b.py                 # 57/60 rule, then the strict 60/60 sensitivity run
     python scripts/run_question_b.py --main-only
     python scripts/run_question_b.py --skip-diagnostic
 
 Outputs (data/processed/qb/ and qb_strict/): predictions, metrics, zone_metrics, decision.json,
-diagnostic, bands, scored, episodes, kpis.
+diagnostic, bands, scored, exceptions, kpis.
 """
 
 from __future__ import annotations
@@ -18,10 +18,7 @@ import pandas as pd
 
 from cubems import config
 from cubems import forecast as F
-from cubems.anomaly import detect_episodes, kpis
-
-MARGIN_KWH = 0.25  # locked before the final test
-MIN_HOURS = 2
+from cubems.anomaly import daily_exceptions, daily_kpis
 
 
 def summarise(pred: pd.DataFrame, models: list[str], label: str) -> list[dict]:
@@ -31,12 +28,12 @@ def summarise(pred: pd.DataFrame, models: list[str], label: str) -> list[dict]:
     return rows
 
 
-def one(min_minutes: int, hourly: pd.DataFrame, zd: pd.DataFrame, diagnostic: bool) -> None:
+def one(min_minutes: int, zd: pd.DataFrame, diagnostic: bool) -> None:
     out = config.results_dir("qb", min_minutes)
     out.mkdir(parents=True, exist_ok=True)
     tag = f"[{min_minutes}/60]"
-    d = F.design(hourly, zd, min_minutes)
-    print(f"  {tag} valid AC zone-hours: {int(d['y'].notna().sum()):,}")
+    d = F.design(zd, min_minutes)
+    print(f"  {tag} complete AC zone-days: {int(d['y'].notna().sum()):,}")
 
     # -------- development folds: benchmark, boosting, ridge
     preds, infos = [], []
@@ -62,8 +59,7 @@ def one(min_minutes: int, hourly: pd.DataFrame, zd: pd.DataFrame, diagnostic: bo
         "dev_nmbe": {k: v["nmbe"] for k, v in dm.items()},
         "ridge_negative_share": float(pd.Series([i.get("ridge_negative_share", 0) for i in infos]).mean()),
         "min_minutes": min_minutes,
-        "exception_margin_kwh": MARGIN_KWH,
-        "exception_min_hours": MIN_HOURS,
+        "target": "next-day total AC kWh per C1 zone",
     }
     bands = F.residual_bands(dev, chosen)
 
@@ -90,20 +86,20 @@ def one(min_minutes: int, hourly: pd.DataFrame, zd: pd.DataFrame, diagnostic: bo
                 zone_rows.append({"stage": stage, "zone_id": zid, "floor": fl, "model": m,
                                   **F.metrics(g["y"].to_numpy(), g[m].to_numpy())})
 
-    # -------- exception layer on the final test
-    sc = final.merge(bands, on=["zone_id", "hour", "day_type"], how="left")
+    # -------- retrospective daily deviations on the final test
+    sc = final.merge(bands, on=["zone_id", "day_type"], how="left")
     sc["pred"] = sc[chosen]
     sc["lo"] = (sc["pred"] + sc["res_lo"]).clip(lower=0)
-    sc["hi"] = sc["pred"] + sc["res_hi"]
+    sc["hi"] = (sc["pred"] + sc["res_hi"]).clip(lower=0)
     sc = sc.dropna(subset=["lo", "hi"])
-    sc["zone"] = sc["zone_id"].str.split("Z").str[1].astype(int)
-    scored, episodes = detect_episodes(sc, MARGIN_KWH, MIN_HOURS, value="y")
-    k = kpis(scored, episodes)
-    decision["episodes"] = int(len(episodes))
-    decision["zones_with_episodes"] = int(episodes["zone_id"].nunique())
+    scored = daily_exceptions(sc)
+    exceptions = scored[scored["flag"]].sort_values("departure_kwh", key=lambda s: s.abs(), ascending=False)
+    k = daily_kpis(scored)
+    decision["exception_days"] = int(len(exceptions))
+    decision["zones_with_exceptions"] = int(exceptions["zone_id"].nunique())
     print(f"  {tag} chosen: {chosen} | dev MAE boost {dm['boosting']['mae']:.3f} ridge {dm['ridge']['mae']:.3f} "
           f"bench {dm['benchmark']['mae']:.3f} | final MAE {fm['mae']:.3f} skill {fm['skill_vs_benchmark']:.1%} | "
-          f"{len(episodes)} exception episodes")
+          f"{len(exceptions)} exception zone-days")
 
     if diagnostic and min_minutes == config.MIN_HOUR_MINUTES:
         t = time.perf_counter()
@@ -115,8 +111,8 @@ def one(min_minutes: int, hourly: pd.DataFrame, zd: pd.DataFrame, diagnostic: bo
     pd.DataFrame(zone_rows).to_parquet(out / "zone_metrics.parquet", index=False)
     pd.DataFrame(infos).to_parquet(out / "folds.parquet", index=False)
     bands.to_parquet(out / "bands.parquet", index=False)
-    scored.drop(columns=["run"]).to_parquet(out / "scored.parquet", index=False)
-    episodes.to_parquet(out / "episodes.parquet", index=False)
+    scored.to_parquet(out / "scored.parquet", index=False)
+    exceptions.to_parquet(out / "exceptions.parquet", index=False)
     k.to_parquet(out / "kpis.parquet", index=False)
     (out / "decision.json").write_text(json.dumps(decision, indent=2))
 
@@ -126,11 +122,10 @@ def main() -> int:
     ap.add_argument("--main-only", action="store_true", help="skip the strict 60/60 sensitivity run")
     ap.add_argument("--skip-diagnostic", action="store_true", help="skip the weekly-block CV diagnostic")
     args = ap.parse_args()
-    hourly = pd.read_parquet(config.HOURLY_PATH)
     zd = pd.read_parquet(config.ZONE_DAY_PATH)
-    one(config.MIN_HOUR_MINUTES, hourly, zd, not args.skip_diagnostic)
+    one(config.MIN_HOUR_MINUTES, zd, not args.skip_diagnostic)
     if not args.main_only:
-        one(config.STRICT_HOUR_MINUTES, hourly, zd, False)
+        one(config.STRICT_HOUR_MINUTES, zd, False)
     return 0
 
 

@@ -47,18 +47,20 @@ for label, strict in (("57/60", False), ("60/60", True)):
     fin = m[(m["subset"] == "final (all floors)")].set_index("model")
     rows.append({"rule": label, "chosen": d["chosen"], "dev_boosting": dev["boosting"], "dev_ridge": dev["ridge"],
                  "dev_benchmark": dev["benchmark"], "final_mae": fin.loc[d["chosen"], "mae"],
-                 "final_skill": fin.loc[d["chosen"], "skill_vs_benchmark"], "episodes": d["episodes"]})
+                 "final_skill": fin.loc[d["chosen"], "skill_vs_benchmark"],
+                 "exception_days": d["exception_days"]})
 qb = pd.DataFrame(rows)
 if len(qb):
     beats = (qb["dev_boosting"] < qb["dev_benchmark"]).tolist()
     with card("Question B: does the model decision change?",
-              "The same model is chosen under both rules. Note that on the development folds boosting is "
+              f"{'The same model is' if qb.chosen.nunique() == 1 else 'Different models are'} chosen under "
+              "the two completeness rules. Development boosting is "
               + ("ahead of" if all(beats) else "not consistently ahead of")
-              + " the 7-day benchmark; its advantage shows on the final test.", None):
+              + " the seven-day daily benchmark.", None):
         st.dataframe(qb, hide_index=True, width="stretch", column_config={
             "dev_boosting": st.column_config.NumberColumn("Dev MAE boosting", format="%.3f"),
             "dev_ridge": st.column_config.NumberColumn("Dev MAE ridge", format="%.3f"),
             "dev_benchmark": st.column_config.NumberColumn("Dev MAE benchmark", format="%.3f"),
             "final_mae": st.column_config.NumberColumn("Final MAE", format="%.3f"),
             "final_skill": st.column_config.NumberColumn("Final skill", format="percent"),
-            "episodes": st.column_config.NumberColumn("Exception episodes")})
+            "exception_days": st.column_config.NumberColumn("Exception zone-days")})

@@ -56,7 +56,7 @@ def build(args: argparse.Namespace) -> None:
     if args.no_weather:
         print("\n=== 4/4 Question B skipped: it needs weather features (run without --no-weather) ===")
     else:
-        step("4/4 Question B: day-ahead forecast + exceptions", "run_question_b.py",
+        step("4/4 Question B: next-day zone priorities + daily deviations", "run_question_b.py",
              *(["--main-only", "--skip-diagnostic"] if args.quick else []))
     tail = "" if args.serve else " Next: streamlit run app/Home.py (or add --serve next time)"
     print(f"\nAll done in {time.perf_counter() - start:.0f}s.{tail}")

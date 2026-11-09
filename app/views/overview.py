@@ -36,15 +36,15 @@ def headlines() -> dict:
 
     dec = load_qb_decision()
     if dec is not None:
-        out.update({k: dec[k] for k in ("chosen", "final_mae", "final_skill_vs_benchmark", "episodes")})
+        out.update({k: dec[k] for k in ("chosen", "final_mae", "final_skill_vs_benchmark", "exception_days")})
         k = load_qb("kpis")
-        out["worst_zone"], out["worst_burden"] = k.iloc[0]["zone_id"], float(k.iloc[0]["duration_burden"])
+        out["worst_zone"], out["worst_rate"] = k.iloc[0]["zone_id"], float(k.iloc[0]["exception_rate"])
     return out
 
 
 page_header("Where to Look First",
             "Show facilities managers where the building's electricity goes, how well each zone's AC use can be "
-            "predicted a day ahead, and which zones then behave unexpectedly.",
+            "forecast for the next day, and which zones deserve review first.",
             eyebrow="CU-BEMS case study · Group 7")
 
 load_zone_day()  # shows the build panel (outside the cache) if nothing is built yet
@@ -56,7 +56,7 @@ c[2].metric("Complete zone-days, 2019", f"{H['zone_days']:,}", border=True,
             help=f"{H['usable_share']:.1%} of all 2019 zone-days have all 24 hours valid (57/60 rule)")
 if "final_mae" in H:
     c[3].metric("Day-ahead AC skill vs benchmark", f"{H['final_skill_vs_benchmark']:+.1%}", border=True,
-                help=f"Final test Sep–Dec, MAE {H['final_mae']:.2f} kWh per zone-hour ({H['chosen']})")
+                help=f"Final test Sep–Dec, MAE {H['final_mae']:.1f} kWh per zone-day ({H['chosen']})")
 
 st.markdown("#### Headline findings")
 a, b, w, x = st.columns(4)
@@ -75,15 +75,16 @@ with b.container(border=True, height="stretch"):
 with w.container(border=True, height="stretch"):
     st.badge("Question B", color="orange")
     if "final_mae" in H:
-        st.markdown(f"The day-ahead forecast beats 'same hour last week' by **{H['final_skill_vs_benchmark']:.1%}** "
-                    f"on Sep–Dec (MAE {H['final_mae']:.2f} kWh per zone-hour). The margin is modest.")
-    st.page_link("views/forecast.py", label="Forecast accuracy", icon=":material/arrow_forward:")
+        st.markdown(f"The next-day zone-total forecast beats 'same day last week' by "
+                    f"**{H['final_skill_vs_benchmark']:.1%}** on Sep–Dec "
+                    f"(MAE {H['final_mae']:.1f} kWh per zone-day).")
+    st.page_link("views/forecast.py", label="Next-day priorities", icon=":material/arrow_forward:")
 with x.container(border=True, height="stretch"):
     st.badge("Question B", color="orange")
     if "worst_zone" in H:
-        st.markdown(f"**{H['episodes']} exception episodes** where AC was unusual for the forecast. "
-                    f"Check **{H['worst_zone']}** first ({H['worst_burden']:.1f}% of hours).")
-    st.page_link("views/exceptions.py", label="Exceptions", icon=":material/arrow_forward:")
+        st.markdown(f"**{H['exception_days']} zone-days** fell outside the expected daily range. "
+                    f"Review **{H['worst_zone']}** first ({H['worst_rate']:.1f}% of monitored days).")
+    st.page_link("views/exceptions.py", label="Daily deviations", icon=":material/arrow_forward:")
 
 st.markdown("#### The two questions")
 qa, qb = st.columns(2)
@@ -94,18 +95,18 @@ with qa.container(border=True, height="stretch"):
                 "- **k (3–8):** cluster size and spread → half-year ARI ≥ 0.8 → silhouette → interpretability\n"
                 "- **Output:** kWh per cluster, zone, floor and end use; weather and calendar attached afterwards")
 with qb.container(border=True, height="stretch"):
-    st.markdown("**B · How well can each zone's hourly AC use be predicted a day ahead?** (predictive)")
-    st.markdown("- **Unit:** zone-hour · **Issued:** 00:00 on day D for all 24 hours of D\n"
-                "- **Models:** same-hour-last-week benchmark, Poisson gradient boosting (monotone), Ridge\n"
+    st.markdown("**B · Which zones merit attention tomorrow based on total AC use?** (predictive)")
+    st.markdown("- **Unit:** complete zone-day · **Issued:** 00:00 before day D's readings\n"
+                "- **Models:** same day last week benchmark, Poisson gradient boosting, Ridge\n"
                 "- **Evaluation:** chronological expanding window, monthly refit; dev May–Aug, final Sep–Dec\n"
-                "- **Exception layer:** hours outside the forecast's locked residual range → event rate, duration burden")
+                "- **Review layer:** daily totals outside the forecast's locked residual range")
     st.caption("Question A's cluster labels are never inputs to Question B.")
 
 with st.expander("How the professor's feedback is built in"):
     st.markdown(
-        "1. **External weather:** Open-Meteo (ERA5) day-level features are Question B inputs and are attached to "
-        "Question A clusters as labels (C1 zones only). Correlation, not cause.\n"
-        "2. **Forecasting for Question B:** Question B is now a day-ahead prediction task. Validation is chronological, "
+        "1. **External weather:** Previous-day Open-Meteo (ERA5) features inform Question B; day-D observed weather "
+        "is not used. Question A clusters receive day-level weather labels (C1 zones only).\n"
+        "2. **Forecasting for Question B:** Question B predicts next-day AC totals. Validation is chronological, "
         "because a forecaster can't train on later months; a seasonally stratified weekly-block CV runs as a diagnostic.\n"
-        "3. **X factor:** the weather-aware model feeds the exception report, so an exception means 'unusual given the "
-        "weather and recent history', not just 'high on a hot day'.")
+        "3. **X factor:** the daily forecast ranks zones for next-day review. After the day ends, unusually high or "
+        "low totals are candidates for investigation, not confirmed faults.")

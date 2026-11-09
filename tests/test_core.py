@@ -4,7 +4,7 @@ import pandas as pd
 from cubems import config
 from cubems import forecast as F
 from cubems.aggregate import valid_kwh, zone_group
-from cubems.anomaly import detect_episodes, kpis
+from cubems.anomaly import daily_exceptions, daily_kpis
 from cubems.calendar import holiday_table
 from cubems.loader import parse_channel
 
@@ -44,34 +44,61 @@ def test_folds_are_chronological():
 
 
 def _toy():
-    ts = pd.date_range("2019-01-01", "2019-03-31 23:00", freq="h")
-    y = np.where(ts.hour.isin(range(8, 17)) & (ts.day_of_week < 5), 10.0, 0.0)
-    d = pd.DataFrame({"timestamp": ts, "y": y, "zone_id": "F2Z1", "floor": 2, "hour": ts.hour,
-                      "dow": ts.day_of_week, "date": ts.normalize(), "is_holiday": 0,
-                      "is_weekend": (ts.day_of_week >= 5).astype(int),
-                      "day_type": np.where(ts.day_of_week >= 5, "Weekend/holiday", "Workday"),
-                      "month": ts.strftime("%Y-%m")})
-    d["lag_1d"] = d["y"].shift(24)
-    d["lag_7d"] = d["y"].shift(168)
-    d["yday_mean"] = d.groupby("date")["y"].transform("mean").shift(24)
-    for c in F.LAGS:
-        d[f"{c}_missing"] = d[c].isna().astype(int)
-    for c in config.QB_WEATHER_FEATURES:
-        d[c] = 30.0
+    dates = pd.date_range("2019-01-01", "2019-03-31", freq="D")
+    y = np.where(dates.day_of_week < 5, 90.0, 0.0)
+    d = pd.DataFrame({"date": dates, "ac_kwh": y, "ac_hours": 24, "ac_hours_strict": 24,
+                         "group": "C1", "zone_id": "F2Z1", "floor": 2, "zone": 1,
+                         "dow": dates.day_of_week, "is_holiday": False,
+                         "is_weekend": dates.day_of_week >= 5,
+                         "day_type": np.where(dates.day_of_week >= 5, "Weekend/holiday", "Workday")})
+    for col in config.QB_WEATHER_FEATURES:
+        d[col] = np.arange(len(dates), dtype=float)
     return d
 
 
+def test_daily_design_uses_complete_days_and_prior_information():
+    zd = _toy().iloc[:9].copy()
+    zd.loc[2, "ac_hours"] = 23
+    zd.loc[2, "ac_kwh"] = 40.0
+    d = F.design(zd)
+    assert d.loc[2, "y"] != d.loc[2, "y"]  # incomplete target is missing
+    assert np.isnan(d.loc[3, "lag_1d"])  # missing day cannot become a lag
+    assert d.loc[7, "lag_7d"] == 90.0
+    assert "wx_temp_mean" not in F.FEATURES  # observed day-D weather is unavailable at issue time
+    assert d.loc[3, "wx_prev_temp_mean"] == 2.0
+
+
+def test_daily_design_strict_rule_requires_60_minute_hours():
+    zd = _toy().iloc[:2].copy()
+    zd.loc[0, "ac_hours_strict"] = 23
+    assert np.isnan(F.design(zd, config.STRICT_HOUR_MINUTES).loc[0, "y"])
+
+
 def test_leakage_checks_and_nonnegative_predictions():
-    d = _toy()
+    d = F.design(_toy())
     f = F.Fold("development", "2019-03", pd.Timestamp("2019-03-01"))
     out, _ = F.run_fold(d, f, ("boosting", "ridge"))
     assert (out[["benchmark", "boosting", "ridge"]] >= 0).all().all()
-    assert out["timestamp"].min() >= pd.Timestamp("2019-03-01")
+    assert out["date"].min() >= pd.Timestamp("2019-03-01")
+    assert out["date"].nunique() == 31
+    assert "typical_kwh" in out.columns
+    assert out["typical_kwh"].notna().all()
 
 
-def test_episode_needs_consecutive_hours():
-    ts = pd.date_range("2019-09-02 08:00", periods=6, freq="h")
-    s = pd.DataFrame({"floor": 2, "zone": 1, "timestamp": ts, "kw": [5, 20, 20, 5, 20, 5], "lo": 0.0, "hi": 10.0})
-    scored, ep = detect_episodes(s, margin_kw=0.25, min_hours=2)
-    assert len(ep) == 1 and ep.iloc[0]["duration_h"] == 2
-    assert kpis(scored, ep).iloc[0]["duration_burden"] == 100 * 2 / 6
+def test_daily_exception_flags_and_zone_rate():
+    s = pd.DataFrame({"zone_id": ["F2Z1"] * 3, "floor": 2, "zone": 1,
+                      "date": pd.date_range("2019-09-02", periods=3),
+                      "y": [12.0, 31.0, 1.0], "lo": [5.0] * 3, "hi": [20.0] * 3})
+    scored = daily_exceptions(s)
+    assert scored["direction"].tolist() == ["Within range", "Above expected", "Below expected"]
+    assert daily_kpis(scored).iloc[0]["exception_days"] == 2
+
+
+def test_priority_hit_rate_checks_the_highest_use_zone():
+    d = pd.DataFrame({"date": [pd.Timestamp("2019-09-02")] * 3,
+                      "zone_id": ["F2Z1", "F2Z2", "F2Z4"],
+                      "y": [30.0, 20.0, 10.0],
+                      "ridge": [31.0, 15.0, 12.0],
+                      "benchmark": [5.0, 25.0, 10.0]})
+    assert F.priority_hit_rate(d, "ridge", k=1) == 1.0
+    assert F.priority_hit_rate(d, "benchmark", k=1) == 0.0

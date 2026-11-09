@@ -15,9 +15,9 @@ pages = {
         st.Page("views/patterns.py", title="Daily patterns (k-means)", icon=":material/ssid_chart:"),
         st.Page("views/weather.py", title="Weather and AC", icon=":material/thermostat:"),
     ],
-    "B · Day-ahead AC forecast": [
-        st.Page("views/forecast.py", title="Forecast accuracy", icon=":material/query_stats:"),
-        st.Page("views/exceptions.py", title="Exceptions", icon=":material/crisis_alert:"),
+    "B · Next-day AC priorities": [
+        st.Page("views/forecast.py", title="Next-day priorities", icon=":material/query_stats:"),
+        st.Page("views/exceptions.py", title="Daily deviations", icon=":material/crisis_alert:"),
     ],
     "Data": [
         st.Page("views/quality.py", title="Data quality", icon=":material/fact_check:"),

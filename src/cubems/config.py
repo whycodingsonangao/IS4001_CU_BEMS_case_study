@@ -49,7 +49,6 @@ FLOOR_COMPARE_END = "2019-10-21"  # [D] floor comparisons stop at Floor 6's last
 HISTORY_2018 = ("2018-07-01", "2018-12-31")
 
 # Question B: chronological, expanding window, monthly refit [D]
-QB_LAG_HISTORY = ("2019-01-01", "2019-01-07")  # only used to build lags
 QB_TRAIN_START = "2019-01-08"
 QB_DEV_TEST_MONTHS = ["2019-05", "2019-06", "2019-07", "2019-08"]
 QB_FINAL_TEST_MONTHS = ["2019-09", "2019-10", "2019-11", "2019-12"]
