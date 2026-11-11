@@ -55,26 +55,30 @@ with overview_tab:
     # ---------------------------------------------------------------- composition by floor
     dfl = d[d["date"] <= pd.Timestamp(config.FLOOR_COMPARE_END)]
     fl = dfl.groupby("floor")[uses].sum().div(1000).rename(columns=names)
-    top_floor = fl.sum(axis=1).idxmax()
-    ac_floor = fl["AC"] / fl.sum(axis=1)
-    with card("Electricity composition by floor (1 Jan – 21 Oct)",
-              f"Floor {top_floor} records the most electricity ({fl.sum(axis=1).max():,.0f} MWh). "
-              f"AC is {ac_floor.min():.0%}–{ac_floor.max():.0%} of each floor's total.",
-              f"1 Jan – {pd.Timestamp(config.FLOOR_COMPARE_END):%d %b} (Floor 6's last full day). F1Z4 (lighting only) "
-              "is in the totals; F1Z2 is Floor 1's only AC zone."):
-        fig = go.Figure()
-        for use in ["AC", "Light", "Plug"]:
-            fig.add_bar(y=[f"Floor {f}" for f in fl.index], x=fl[use], name=USE_LABELS[use], orientation="h",
-                        marker=dict(color=USE_COLORS[use], line=dict(width=1.5, color="rgba(255,255,255,0.9)")),
-                        hovertemplate="%{y} · " + USE_LABELS[use] + ": %{x:,.1f} MWh<extra></extra>")
-        tot = fl.sum(axis=1)
-        fig.add_scatter(y=[f"Floor {f}" for f in fl.index], x=tot, mode="text",
-                        text=[f"  {v:,.0f}" for v in tot],
-                        textposition="middle right", showlegend=False, hoverinfo="skip")
-        fig.update_layout(barmode="stack", xaxis_title="Recorded electricity (MWh)", bargap=0.35)
-        fig.update_yaxes(autorange="reversed")
-        fig.update_xaxes(range=[0, tot.max() * 1.08])
-        show(style(fig, height=330))
+    if fl.empty:
+        st.info(f"The floor comparison covers 1 Jan – {pd.Timestamp(config.FLOOR_COMPARE_END):%d %b} only "
+                "(Floor 6's last full day). Include a month up to October to see it.")
+    else:
+        top_floor = fl.sum(axis=1).idxmax()
+        ac_floor = fl["AC"] / fl.sum(axis=1)
+        with card("Electricity composition by floor (1 Jan – 21 Oct)",
+                  f"Floor {top_floor} records the most electricity ({fl.sum(axis=1).max():,.0f} MWh). "
+                  f"AC is {ac_floor.min():.0%}–{ac_floor.max():.0%} of each floor's total.",
+                  f"1 Jan – {pd.Timestamp(config.FLOOR_COMPARE_END):%d %b} (Floor 6's last full day). F1Z4 (lighting only) "
+                  "is in the totals; F1Z2 is Floor 1's only AC zone."):
+            fig = go.Figure()
+            for use in ["AC", "Light", "Plug"]:
+                fig.add_bar(y=[f"Floor {f}" for f in fl.index], x=fl[use], name=USE_LABELS[use], orientation="h",
+                            marker=dict(color=USE_COLORS[use], line=dict(width=1.5, color="rgba(255,255,255,0.9)")),
+                            hovertemplate="%{y} · " + USE_LABELS[use] + ": %{x:,.1f} MWh<extra></extra>")
+            tot = fl.sum(axis=1)
+            fig.add_scatter(y=[f"Floor {f}" for f in fl.index], x=tot, mode="text",
+                            text=[f"  {v:,.0f}" for v in tot],
+                            textposition="middle right", showlegend=False, hoverinfo="skip")
+            fig.update_layout(barmode="stack", xaxis_title="Recorded electricity (MWh)", bargap=0.35)
+            fig.update_yaxes(autorange="reversed")
+            fig.update_xaxes(range=[0, tot.max() * 1.08])
+            show(style(fig, height=330))
 
 # ---------------------------------------------------------------- Pareto ranking
 with priorities_tab:
