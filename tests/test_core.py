@@ -102,3 +102,45 @@ def test_priority_hit_rate_checks_the_highest_use_zone():
                       "benchmark": [5.0, 25.0, 10.0]})
     assert F.priority_hit_rate(d, "ridge", k=1) == 1.0
     assert F.priority_hit_rate(d, "benchmark", k=1) == 0.0
+
+
+def _minutes(values) -> pd.Series:
+    return pd.Series(values, index=pd.date_range("2019-03-01", periods=len(values), freq="min"), dtype="float32")
+
+
+def test_spike_uses_the_channels_own_running_level():
+    from cubems import qc
+    light = parse_channel("z4_Light(kW)")
+    s = _minutes(np.r_[np.full(500, 3.0), 186.0, np.full(500, 0.01)])
+    code, row = qc.screen_channel(s, light)
+    assert code.tolist().count(qc.SPIKE) == 1 and code[500] == qc.SPIKE
+    assert row["spike_threshold_kw"] == 15.0  # 5 x 3 kW running level
+    # a rarely-used AC unit: off 99% of the time, its normal 3.8 kW running level is not a spike
+    ac = parse_channel("z4_AC2(kW)")
+    code, _ = qc.screen_channel(_minutes(np.r_[np.zeros(2000), np.full(15, 3.8)]), ac)
+    assert (code == qc.OK).all()
+
+
+def test_flatline_ignores_idle_readings_and_respects_kind_limits():
+    from cubems import qc
+    ac = parse_channel("z1_AC1(kW)")
+    idle = _minutes(np.full(600, 0.01))  # standby: flat but legitimate
+    assert (qc.screen_channel(idle, ac)[0] == qc.OK).all()
+    stuck = _minutes(np.r_[np.linspace(1, 3, 30), np.full(60, 2.5), np.linspace(3, 1, 30)])
+    code, row = qc.screen_channel(stuck, ac)
+    assert code.tolist().count(qc.FLAT) == 60 and row["longest_run_min"] == 60
+    light = parse_channel("z1_Light(kW)")
+    assert (qc.screen_channel(_minutes(np.full(300, 0.54)), light)[0] == qc.OK).all()  # under the 360-min limit
+    assert qc.screen_channel(_minutes([np.nan] * 200), parse_channel("z1_S1(degC)"))[1]["longest_run_min"] == 0
+
+
+def test_screen_sets_flagged_minutes_missing_and_lists_episodes():
+    from cubems import qc
+    chans = [parse_channel("z4_Light(kW)"), parse_channel("z4_Plug(kW)")]
+    df = pd.DataFrame({"z4_Light(kW)": np.r_[np.full(100, 3.0), 186.0, 172.0, np.full(98, 3.0)],
+                       "z4_Plug(kW)": np.linspace(0.5, 1.5, 200)},
+                      index=pd.date_range("2019-02-01", periods=200, freq="min"))
+    clean, codes, events, summary = qc.screen(df, chans, 2019, 3)
+    assert clean["z4_Light(kW)"].isna().sum() == 2 and clean["z4_Plug(kW)"].notna().all()
+    assert events[["check", "minutes", "value"]].values.tolist() == [["Spike", 2, 186.0]]
+    assert set(summary["zone_id"]) == {"F3Z4"}

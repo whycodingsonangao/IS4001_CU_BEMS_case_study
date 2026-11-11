@@ -1,7 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from common import SERIES, USE_LABELS, card, load_qa, need, page_header, show, style
+from common import SERIES, USE_LABELS, card, load_qa, load_zone_day, need, page_header, show, style
 from plotly.subplots import make_subplots
 
 from cubems import config
@@ -15,9 +15,10 @@ kselect = need(load_qa("kselect"), "run_question_a.py")
 labels, cent, kwh = load_qa("labels"), load_qa("centroids"), load_qa("kwh")
 screen, scalers = load_qa("screening"), load_qa("scalers")
 
+sep_zones = ", ".join(config.QA_SEPARATE_ZONES)
 group = st.segmented_control("Zone group", ["C1", "C2"], default="C1",
-                             help="C1: AC + lighting + plugs (24 zones, 72 features). "
-                                  "C2: lighting + plugs (8 zones, 48 features).") or "C1"
+                             help=f"C1: AC + lighting + plugs (23 zones clustered, 72 features; {sep_zones} is "
+                                  "reported separately below). C2: lighting + plugs (8 zones, 48 features).") or "C1"
 ks = kselect[kselect["group"] == group].sort_values("k")
 ch = ks[ks["chosen"]].iloc[0]
 lab = labels[labels["group"] == group]
@@ -36,7 +37,7 @@ if "review" in ch["reason"]:
     zs = lab[lab["cluster"].isin(solo_c.index)]["zone_id"].unique()
     st.warning(f"No k in 3–8 passes rule 1 (every cluster ≥3% of zone-days **and** in ≥3 zones). "
                f"{', '.join(zs)} forms its own cluster at every k, so the most stable k with the best silhouette is "
-               "shown. Plan open item 5: inspect this zone.", icon=":material/rule:")
+               "shown. Inspect this zone.", icon=":material/rule:")
 
 # ---------------------------------------------------------------- centroids
 cg = cent[cent["group"] == group]
@@ -59,6 +60,44 @@ with card("What each pattern looks like (mean actual kWh per hour)",
     style(fig, height=360)
     fig.update_layout(legend=dict(y=-0.14, yanchor="top"), margin=dict(t=30, b=40))
     show(fig)
+
+# ---------------------------------------------------------------- zones reported outside the clustering
+sep = load_qa("separate")
+sep = sep[sep["group"] == group] if sep is not None and len(sep) else None
+if sep is not None and len(sep):
+    zd_all = load_zone_day()
+    y19 = zd_all[(zd_all["year"] == 2019) & zd_all["usable"]]
+    for zid, zs in sep.groupby("zone_id"):
+        share_b = y19.loc[y19["zone_id"] == zid, "total_kwh"].sum() / y19["total_kwh"].sum()
+        wd = zs[zs["day_type"] == "Workday"]
+        ac = wd[wd["use"] == "AC"].set_index("hour")["mean_kwh"] if "AC" in set(wd["use"]) else None
+        peak = f" Its workday AC peaks at {ac.idxmax():02d}:00." if ac is not None and len(ac) else ""
+        with card(f"Reported separately: {zid}",
+                  f"<b>{zid}</b> uses <b>{share_b:.0%}</b> of the building's recorded electricity (complete days) "
+                  f"and is not clustered: {config.QA_SEPARATE_ZONES[zid]}.{peak}",
+                  "It formed a one-zone cluster at every k, so no k met the rule that patterns must be shared by ≥3 "
+                  "zones. Grey dotted line: Cluster 1 (the typical workday) for comparison."):
+            uses_z = [u for u in ["AC", "Light", "Plug"] if u in set(zs["use"])]
+            fig = make_subplots(rows=1, cols=len(uses_z), subplot_titles=[USE_LABELS[u] for u in uses_z])
+            for j, use in enumerate(uses_z, start=1):
+                for dtp, colr in [("Workday", SERIES[0]), ("Weekend/holiday", SERIES[1])]:
+                    s = zs[(zs["use"] == use) & (zs["day_type"] == dtp)]
+                    fig.add_scatter(x=s["hour"], y=s["mean_kwh"], mode="lines", name=f"{zid} {dtp.lower()}",
+                                    legendgroup=dtp, showlegend=j == 1, line=dict(width=2, color=colr),
+                                    hovertemplate=f"{zid} {dtp} · {USE_LABELS[use]}<br>%{{x:02d}}:00 · "
+                                                  "%{y:.1f} kWh<extra></extra>", row=1, col=j)
+                ref = cg[(cg["use"] == use) & (cg["cluster"] == 1)]
+                if len(ref):
+                    fig.add_scatter(x=ref["hour"], y=ref["mean_kwh"], mode="lines", name="Cluster 1 (typical)",
+                                    legendgroup="ref", showlegend=j == 1, line=dict(width=1.5, color="#8a8a8a",
+                                                                                   dash="dot"),
+                                    hovertemplate="Cluster 1 · %{x:02d}:00 · %{y:.1f} kWh<extra></extra>",
+                                    row=1, col=j)
+            fig.update_xaxes(tickvals=list(range(0, 24, 6)), ticktext=["00:00", "06:00", "12:00", "18:00"])
+            fig.update_yaxes(title_text="kWh per hour", row=1, col=1)
+            style(fig, height=340)
+            fig.update_layout(legend=dict(y=-0.14, yanchor="top"), margin=dict(t=30, b=40))
+            show(fig)
 
 # ---------------------------------------------------------------- kWh by cluster
 kg = kwh[kwh["group"] == group]

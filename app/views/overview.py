@@ -1,6 +1,7 @@
 import streamlit as st
 from common import load_hourly, load_qa, load_qb, load_qb_decision, load_zone_day, page_header
 
+from cubems import config
 from cubems.aggregate import valid_kwh
 
 
@@ -31,8 +32,7 @@ def headlines() -> dict:
         out["c1_k"] = int(c1["cluster"].max())
         share = c1["cluster"].value_counts(normalize=True)
         out["c1_top_share"] = float(share.get(1, 0))
-        solo = c1.groupby("cluster")["zone_id"].nunique()
-        out["solo_zone"] = ", ".join(c1[c1["cluster"].isin(solo[solo == 1].index)]["zone_id"].unique())
+        out["solo_zone"] = ", ".join(config.QA_SEPARATE_ZONES)
 
     dec = load_qb_decision()
     if dec is not None:
@@ -69,7 +69,7 @@ with b.container(border=True, height="stretch"):
     st.badge("Question A", color="blue")
     if "c1_k" in H:
         st.markdown(f"**{H['c1_k']} recurring patterns** in AC zones; the workday office pattern covers "
-                    f"{H['c1_top_share']:.0%} of days." + (f" **{H['solo_zone']}** runs a 24/7 pattern of its own."
+                    f"{H['c1_top_share']:.0%} of days." + (f" **{H['solo_zone']}** runs 24/7 and is reported separately."
                                                          if H.get("solo_zone") else ""))
     st.page_link("views/patterns.py", label="Daily patterns", icon=":material/arrow_forward:")
 with w.container(border=True, height="stretch"):
@@ -90,7 +90,8 @@ st.markdown("#### The two questions")
 qa, qb = st.columns(2)
 with qa.container(border=True, height="stretch"):
     st.markdown("**A · Which daily patterns recur, and how much kWh does each account for?** (descriptive)")
-    st.markdown("- **Unit:** zone-day · **Method:** k-means on 24 hourly kWh per end use (C1: 72, C2: 48 features)\n"
+    st.markdown("- **Unit:** zone-day · **Method:** k-means on 24 hourly kWh per end use (C1: 72, C2: 48 features); "
+                "24/7 zone F1Z2 reported separately\n"
                 "- **Scaling:** each zone × end use ÷ its 95th-percentile hourly kWh (floor 0.1 kWh)\n"
                 "- **k (3–8):** cluster size and spread → half-year ARI ≥ 0.8 → silhouette → interpretability\n"
                 "- **Output:** kWh per cluster, zone, floor and end use; weather and calendar attached afterwards")

@@ -10,6 +10,7 @@ from common import (
     card,
     heat_text,
     load_hourly,
+    load_qc,
     load_zone_day,
     load_zones,
     page_header,
@@ -124,13 +125,57 @@ with card("Official 2019 holiday list (cited) checked against the building",
                                                                    max_value=1.4),
         "source": st.column_config.TextColumn("Source", width="large")})
 
-c1, c2 = st.columns(2)
-with c1, card("Extreme readings", "Flagged, kept, never deleted automatically.",
-              f"Any power channel above {config.EXTREME_KW:.0f} kW in a minute."):
-    ex = zdg.loc[zdg["extreme_minutes"] > 0, ["zone_id", "date", "extreme_minutes"]]
-    st.dataframe(ex, hide_index=True, width="stretch", column_config={
-        "zone_id": "Zone", "date": st.column_config.DateColumn("Date"),
-        "extreme_minutes": st.column_config.NumberColumn("Minutes flagged")})
+events, chan = load_qc("events"), load_qc("channels")
+if events is None or chan is None:
+    st.info("Sensor screening results aren't built yet. Use the Rebuild panel at the bottom of this page.")
+    c1, c2 = st.columns(2)
+else:
+    in_groups = {z for z, g in zip(load_zones()["zone_id"], load_zones()["group"], strict=True) if g in groups}
+    ev = events[(events["year"] == 2019) & events["zone_id"].isin(in_groups)]
+    ch19 = chan[(chan["year"] == 2019) & chan["zone_id"].isin(in_groups)]
+
+    sp = ev[ev["check"] == "Spike"]
+    if len(sp):
+        busiest = sp.groupby([sp["floor"], sp["start"].dt.to_period("M")])["minutes"].sum().idxmax()
+        share = sp.loc[(sp["floor"] == busiest[0]) & (sp["start"].dt.to_period("M") == busiest[1]), "minutes"].sum()
+        head = (f"<b>{int(sp['minutes'].sum())}</b> spike minutes on {len(sp[['zone_id', 'channel']].drop_duplicates())} channels were set to "
+                f"missing. {share / sp['minutes'].sum():.0%} fall on Floor {busiest[0]} in "
+                f"{busiest[1].strftime('%b %Y')}, hitting several channels at once: a logging glitch, not equipment.")
+    else:
+        head = "No spikes in the selected zones."
+    with card("Spikes: readings far above the channel's own running level", head,
+              f"Flagged when a reading is above {config.SPIKE_RATIO:g}× the channel's "
+              f"{config.SPIKE_REF_PCTL}th percentile of active readings (> {config.SPIKE_ACTIVE_KW} kW) and above "
+              f"{config.SPIKE_MIN_KW:g} kW. Flagged minutes become missing; the {config.MIN_HOUR_MINUTES}/60 hour rule "
+              "then decides whether the hour survives."):
+        st.dataframe(sp.sort_values("value", ascending=False)[["zone_id", "channel", "start", "minutes", "value",
+                                                                "threshold"]],
+                     hide_index=True, width="stretch", height=280, column_config={
+                         "zone_id": "Zone", "channel": "Channel",
+                         "start": st.column_config.DatetimeColumn("Start", format="D MMM YYYY HH:mm"),
+                         "minutes": st.column_config.NumberColumn("Minutes"),
+                         "value": st.column_config.NumberColumn("Peak kW", format="%.1f"),
+                         "threshold": st.column_config.NumberColumn("Threshold kW", format="%.1f")})
+
+    c1, c2 = st.columns(2)
+    fl = ev[ev["check"] == "Flatline"]
+    runs = ch19.dropna(subset=["flat_threshold_min"]).copy()
+    runs["ratio"] = runs["longest_run_min"] / runs["flat_threshold_min"]
+    runs = runs.sort_values("ratio", ascending=False)
+    with c1, card("Flatlined (stuck) sensors",
+                  f"<b>{len(fl)}</b> stuck episode(s) found, {int(fl['minutes'].sum())} minutes set to missing."
+                  if len(fl) else "<b>No stuck sensors found.</b> The longest identical runs stay below each "
+                                  "channel type's limit.",
+                  "Same value repeated for ≥ " + ", ".join(f"{k} {v} min" for k, v in config.FLATLINE_MINUTES.items())
+                  + f". Power channels are checked only at ≥ {config.FLATLINE_MIN_KW} kW: idle readings are "
+                    "naturally flat. Lighting can be legitimately constant (a few lamps left on), so its limit is "
+                    "longest. Lux is not checked or used."):
+        st.dataframe(runs[["zone_id", "channel", "kind", "longest_run_min", "flat_threshold_min"]],
+                     hide_index=True, width="stretch", height=260, column_config={
+                         "zone_id": "Zone", "channel": "Channel", "kind": "Type",
+                         "longest_run_min": st.column_config.NumberColumn("Longest identical run (min)"),
+                         "flat_threshold_min": st.column_config.NumberColumn("Limit (min)")})
+
 with c2, card("Indoor sensors, 2019", "Not model inputs: 0% coverage in Jan–Feb on every floor; no columns on Floor 1."):
     env = (y19[y19["temp_minutes"].notna()].groupby("zone_id")["env_coverage"]
            .apply(lambda s: 100 * (s >= 0.95).mean()).rename("pct").reset_index())

@@ -1,6 +1,7 @@
 """Question A: k-means clustering of complete zone-days (methodology plan, section 4).
 
 * One row = one zone on one day. Features = 24 hourly kWh per end use (C1: 72, C2: 48).
+* Zones in ``config.QA_SEPARATE_ZONES`` (F1Z2, 24/7) are not clustered; see :func:`separate_profiles`.
 * A day is used only if all 24 hours are valid for every end use in its group.
 * Scaling: each zone x end-use block is divided by its 95th-percentile hourly kWh (floor 0.1 kWh).
 * Calendar variables are never features; they label clusters afterwards (as does weather).
@@ -38,7 +39,8 @@ def feature_matrix(hourly: pd.DataFrame, zone_day: pd.DataFrame, group: str,
                    min_minutes: int = config.MIN_HOUR_MINUTES, year: int = config.YEAR) -> Matrix:
     uses = config.GROUP_USES[group]
     flag = "usable" if min_minutes == config.MIN_HOUR_MINUTES else "usable_strict"
-    days = zone_day[(zone_day["group"] == group) & zone_day[flag] & (zone_day["year"] == year)]
+    days = zone_day[(zone_day["group"] == group) & zone_day[flag] & (zone_day["year"] == year)
+                    & ~zone_day["zone_id"].isin(config.QA_SEPARATE_ZONES)]
     keys = days[["floor", "zone", "date"]]
     h = hourly[hourly["timestamp"].dt.year == year].copy()
     h["date"] = h["timestamp"].dt.normalize()
@@ -53,6 +55,26 @@ def feature_matrix(hourly: pd.DataFrame, zone_day: pd.DataFrame, group: str,
     wide = pd.concat(blocks, axis=1).dropna()
     meta = wide.index.to_frame(index=False).merge(days, on=["floor", "zone", "date"], how="left")
     return Matrix(group, uses, meta, wide.to_numpy(dtype=float), cols)
+
+
+def separate_profiles(hourly: pd.DataFrame, zone_day: pd.DataFrame,
+                      min_minutes: int = config.MIN_HOUR_MINUTES, year: int = config.YEAR) -> pd.DataFrame:
+    """Mean hourly kWh by day type and end use for zones reported outside the clustering, plus day totals."""
+    flag = "usable" if min_minutes == config.MIN_HOUR_MINUTES else "usable_strict"
+    days = zone_day[zone_day["zone_id"].isin(config.QA_SEPARATE_ZONES) & zone_day[flag]
+                    & (zone_day["year"] == year)]
+    h = hourly[hourly["timestamp"].dt.year == year].assign(date=lambda d: d["timestamp"].dt.normalize(),
+                                                           hour=lambda d: d["timestamp"].dt.hour)
+    h = h.merge(days[["floor", "zone", "date", "zone_id", "group", "day_type"]], on=["floor", "zone", "date"])
+    rows = []
+    for use in config.END_USES:
+        if f"{use.lower()}_kwh" not in h:
+            continue
+        v = h.assign(kwh=valid_kwh(h, use, min_minutes)).dropna(subset=["kwh"])
+        g = v.groupby(["zone_id", "group", "day_type", "hour"]).agg(mean_kwh=("kwh", "mean"),
+                                                                      days=("date", "nunique")).reset_index()
+        rows.append(g.assign(use=use))
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
 def p95_scale(m: Matrix) -> tuple[np.ndarray, pd.DataFrame]:

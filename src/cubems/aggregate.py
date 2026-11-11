@@ -2,6 +2,7 @@
 
 Conventions
 -----------
+* Readings flagged by :mod:`cubems.qc` (spikes, flatlined sensors) are set to missing first.
 * A minute is valid for an end use only if every circuit of that end use has a reading.
 * ``{use}_kwh`` for an hour = mean of its valid per-minute kW x 1 h. ``{use}_minutes`` counts the valid
   minutes. An hour is *valid* only when minutes >= the threshold (57 by default, 60 for the strict
@@ -13,7 +14,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from . import config
+from . import config, qc
 from .calendar import add_calendar
 from .loader import Channel, load_floor
 
@@ -32,7 +33,7 @@ def zone_id(floor, zone) -> str:
     return f"F{int(floor)}Z{int(zone)}"
 
 
-def _zone_minutes(df: pd.DataFrame, chans: list[Channel]) -> pd.DataFrame:
+def _zone_minutes(df: pd.DataFrame, chans: list[Channel], codes: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(index=df.index)
     power = [c for c in chans if c.unit == "kW"]
     for use in config.END_USES:
@@ -44,7 +45,9 @@ def _zone_minutes(df: pd.DataFrame, chans: list[Channel]) -> pd.DataFrame:
         cols = [c.column for c in chans if c.kind == kind]
         if cols:
             out[kind] = df[cols].mean(axis=1)
-    out["extreme"] = (df[[c.column for c in power]] > config.EXTREME_KW).any(axis=1)
+    zc = codes[[c.column for c in chans]]
+    out["spike"] = (zc == qc.SPIKE).any(axis=1)
+    out["flat"] = (zc == qc.FLAT).any(axis=1)
     return out
 
 
@@ -59,16 +62,19 @@ def _to_hourly(m: pd.DataFrame) -> pd.DataFrame:
         if kind in m:
             h[f"{kind}_mean"] = g[kind].mean()
             h[f"{kind}_minutes"] = g[kind].count()
-    h["extreme_minutes"] = g["extreme"].sum()
+    h["spike_minutes"] = g["spike"].sum()
+    h["flat_minutes"] = g["flat"].sum()
     return h
 
 
-def build_floor(year: int, floor: int) -> tuple[pd.DataFrame, list[dict]]:
-    df, chans = load_floor(year, floor)
+def build_floor(year: int, floor: int) -> tuple[pd.DataFrame, list[dict], pd.DataFrame, pd.DataFrame]:
+    """(zone-hour table, zone registry rows, screened episodes, per-channel screening summary)."""
+    raw, chans = load_floor(year, floor)
+    df, codes, events, channels = qc.screen(raw, chans, year, floor)
     frames, zones = [], []
     for zone in sorted({c.zone for c in chans}):
         zc = [c for c in chans if c.zone == zone]
-        h = _to_hourly(_zone_minutes(df, zc)).reset_index()
+        h = _to_hourly(_zone_minutes(df, zc, codes)).reset_index()
         h.insert(0, "zone", zone)
         h.insert(0, "floor", floor)
         frames.append(h)
@@ -80,7 +86,7 @@ def build_floor(year: int, floor: int) -> tuple[pd.DataFrame, list[dict]]:
             "has_env": any(c.kind == "temp" for c in zc),
             "channels": ", ".join(c.name for c in zc if c.unit == "kW"),
         })
-    return pd.concat(frames, ignore_index=True), zones
+    return pd.concat(frames, ignore_index=True), zones, events, channels
 
 
 def valid_kwh(h: pd.DataFrame, use: str, min_minutes: int = config.MIN_HOUR_MINUTES) -> pd.Series:
@@ -113,7 +119,8 @@ def to_zone_day(hourly: pd.DataFrame) -> pd.DataFrame:
         if f"{kind}_mean" in h:
             agg[f"{kind}_mean"] = (f"{kind}_mean", "mean")
             agg[f"{kind}_minutes"] = (f"{kind}_minutes", "sum")
-    agg["extreme_minutes"] = ("extreme_minutes", "sum")
+    agg["spike_minutes"] = ("spike_minutes", "sum")
+    agg["flat_minutes"] = ("flat_minutes", "sum")
     agg["n_hours"] = ("timestamp", "size")
     zd = h.groupby(["floor", "zone", "group", "date"], as_index=False).agg(**agg)
 

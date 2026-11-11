@@ -127,6 +127,13 @@ def load_zones() -> pd.DataFrame:
 
 
 @st.cache_data
+def load_qc(name: str) -> pd.DataFrame | None:
+    """Screening outputs: 'events' (flagged episodes) or 'channels' (per-channel thresholds and counts)."""
+    p = {"events": config.QC_EVENTS_PATH, "channels": config.QC_CHANNELS_PATH}[name]
+    return pd.read_parquet(p) if p.exists() else None
+
+
+@st.cache_data
 def load_weather_daily() -> pd.DataFrame | None:
     if not config.WEATHER_DAILY_PATH.exists():
         return None

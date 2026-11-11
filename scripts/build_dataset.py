@@ -8,6 +8,8 @@ Outputs (all gitignored, regenerate any time):
     data/processed/zone_day.parquet     one row per zone x day, coverage, usable flag, calendar,
                                         weather features joined on date
     data/processed/zones.parquet        zone registry (group, AC units, sensors)
+    data/processed/qc_events.parquet    screened-out spike / flatline episodes (per channel)
+    data/processed/qc_channels.parquet  per-channel screening thresholds and counts
     data/external/weather_hourly.parquet  cached Open-Meteo pull
     data/processed/weather_daily.parquet
 """
@@ -38,16 +40,23 @@ def main() -> int:
         return 1
     config.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-    hourly, zones = [], []
+    hourly, zones, events, channels = [], [], [], []
     for year, floor in files:
         t = time.perf_counter()
-        h, z = build_floor(year, floor)
+        h, z, ev, ch = build_floor(year, floor)
         hourly.append(h)
         zones.extend(z)
-        print(f"  {year} Floor {floor}: {len(h):>7,} zone-hours  ({time.perf_counter() - t:.1f}s)")
+        events.append(ev)
+        channels.append(ch)
+        n_sp = int(ev.loc[ev["check"] == "Spike", "minutes"].sum())
+        n_fl = int(ev.loc[ev["check"] == "Flatline", "minutes"].sum())
+        print(f"  {year} Floor {floor}: {len(h):>7,} zone-hours | screened out: {n_sp} spike, {n_fl} flatline "
+              f"minutes  ({time.perf_counter() - t:.1f}s)")
 
     hourly_df = pd.concat(hourly, ignore_index=True).sort_values(["floor", "zone", "timestamp"])
     hourly_df.to_parquet(config.HOURLY_PATH, index=False)
+    pd.concat(events, ignore_index=True).to_parquet(config.QC_EVENTS_PATH, index=False)
+    pd.concat(channels, ignore_index=True).to_parquet(config.QC_CHANNELS_PATH, index=False)
 
     zones_df = (
         pd.DataFrame(zones)

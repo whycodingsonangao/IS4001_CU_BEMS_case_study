@@ -8,7 +8,7 @@ behaved unexpectedly (the retrospective review layer).
 |---|---|---|
 | Asks | Which daily electricity patterns recur, and how much kWh does each account for? | Which AC zones should a facility manager review tomorrow? |
 | Unit | Zone-day | Complete AC zone-day |
-| Method | k-means on 24 hourly kWh per end use (C1: 72, C2: 48 features), 95th-percentile scaling | Same-zone daily total seven days earlier vs Poisson gradient boosting vs Ridge |
+| Method | k-means on 24 hourly kWh per end use (C1: 72, C2: 48 features), 95th-percentile scaling; 24/7 zone F1Z2 reported separately | Same-zone daily total seven days earlier vs Poisson gradient boosting vs Ridge |
 | Evaluation | k in 3–8: size rule → half-year ARI ≥ 0.8 → silhouette → interpretability; Ward cross-check | Chronological expanding window, monthly refit: dev May–Aug, final test Sep–Dec |
 | KPIs | kWh per cluster, zone, floor and end use | Zone-day MAE, skill vs benchmark and recall@5 for the five highest-use zones (primary); RMSE, CV(RMSE), NMBE (secondary); daily exception rate |
 
@@ -78,6 +78,8 @@ that are already valid, so re-running it is safe.
 | `data/processed/zone_day.parquet` | zone × day | kWh over valid hours, valid hours per end use, `usable` (57/60) and `usable_strict` (60/60), calendar (official holidays, day type, season), weather `wx_*` |
 | `data/processed/zones.parquet` | zone | Group (C1 / C2 / Lighting only), AC unit count, sensors |
 | `data/processed/weather_daily.parquet` | day | Mean/max/min temperature, RH, dew point, radiation, cooling degree-hours |
+| `data/processed/qc_events.parquet` | flagged episode | Spike / flatline episodes per channel: start, end, minutes, peak value, threshold |
+| `data/processed/qc_channels.parquet` | channel × year | Screening thresholds, flagged minutes, longest identical run |
 
 ## Run the analysis (individual steps)
 
@@ -102,18 +104,29 @@ streamlit run app/Home.py     # opens http://localhost:8501 (light/dark follows 
 | Weather and AC (A) | Open-Meteo timeline, AC kWh vs weather, per-zone sensitivity (correlation only) |
 | Next-day priorities (B) | Zone priority list, model decision on dev folds, final test with and without Floor 6, per-zone skill, actual vs predicted daily totals |
 | Daily deviations (B) | Complete days outside each zone's locked expected daily range, exception rate and list (CSV) |
-| Data quality | Complete zone-days (57/60 and 60/60), days lost per zone and month, cited holiday list checked against building load |
+| Data quality | Complete zone-days (57/60 and 60/60), days lost per zone and month, cited holiday list checked against building load, spike and stuck-sensor screening |
 | Sensitivity (60/60) | Every result re-run with the strict rule |
 
 ## Methodology rules (defined once in `src/cubems/config.py`)
 
+- **Screening (`src/cubems/qc.py`):** each channel is compared with its own behaviour, and flagged minutes are
+  set to missing before aggregation.
+  - *Spike:* above 5× the channel's 99th percentile of active (> 0.05 kW) readings and above 1 kW. Using active
+    readings keeps rarely-used AC units' normal running level from being flagged. 2019: 260 minutes removed,
+    241 of them a Floor 3 glitch in February that hit several lighting and plug channels at once.
+  - *Flatline (stuck sensor):* the same value for ≥ 60 min (AC), ≥ 360 min (lighting, plugs) or ≥ 120 min
+    (temperature, RH). Power channels are checked only at ≥ 0.5 kW, because idle readings are naturally flat.
+    Lighting can be legitimately constant, so its limit is longest. 2019: none found.
+  - Impact: 3 complete zone-days lost. Question A's clusters are unchanged (99.99% same labels) and Question B
+    results are identical. Thresholds use each file's full year (a cleaning step, not a model input).
 - **Minute:** valid for an end use only if every circuit of that end use has a reading.
 - **Hour:** valid with at least 57 of 60 valid minutes; kWh = mean kW × 1 h. Otherwise missing, never zero.
   Zeros are kept. Every result is re-run with the strict 60/60 rule.
 - **Complete zone-day (Question A):** all 24 hours valid for every end use of the zone's group.
 - **Complete AC zone-day (Question B):** all 24 AC hours valid; the target is their summed kWh. Missing days are
   excluded from scoring and never treated as zero.
-- **Groups:** C1 = AC + lighting + plugs (24 zones, incl. F1z2); C2 = lighting + plugs (8: F1z1, F1z3, F2z3,
+- **Groups:** C1 = AC + lighting + plugs (24 zones, incl. F1z2, which runs 24/7 and is reported separately
+  instead of clustered); C2 = lighting + plugs (8: F1z1, F1z3, F2z3,
   z3 on Floors 3–7); F1z4 = lighting only (kWh totals only).
 - **Period:** all of 2019. Floor 6 stops 22 Oct 13:27 (the source file is truncated mid-row). Floor comparisons
   use 1 Jan–21 Oct, and the final test is reported with and without Floor 6.
@@ -146,8 +159,11 @@ models/, reports/figures/                gitignored outputs
 
 ## Open items
 
-1. **F1z2 forms its own C1 cluster at every k**, so no k passes rule 1 (≥ 3 zones per cluster). Its 24/7 profile
-   (AC highest at night) suggests a round-the-clock facility. Decide whether to keep it in C1 or report it separately.
+1. **Resolved: F1Z2 is reported separately.** It formed its own C1 cluster at every k, so no k passed rule 1
+   (≥ 3 zones per cluster). It runs 24/7, and on workdays its AC is low in office hours and high 17:00–06:00
+   (the inverse of the office schedule), which suggests a round-the-clock facility. It is now
+   excluded from clustering (`config.QA_SEPARATE_ZONES`) and shown in its own card on the Daily patterns page.
+   Without it, k = 3 passes rules 1–2 under both the 57/60 and 60/60 rules.
 2. **Next-day priority is not an automatic fault diagnosis.** A high forecast may reflect normal operations; use
    the priority list to decide what to review. Exception flags are available only after the target day ends.
 3. **Institution-specific closures:** compare widespread daily deviations with the university calendar.
