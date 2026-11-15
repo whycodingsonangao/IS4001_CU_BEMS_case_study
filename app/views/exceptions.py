@@ -61,7 +61,8 @@ with card("Exception list", "Check building-wide dates against the calendar befo
 
 zones = sorted(scored.zone_id.unique(), key=zone_key)
 with card("Inspect a zone's daily range"):
-    zone = st.selectbox("Zone", zones, index=zones.index(top.zone_id))
+    linked = st.query_params.get("zone")  # set by the Operations Twin's link to this view
+    zone = st.selectbox("Zone", zones, index=zones.index(linked if linked in zones else top.zone_id))
     q = scored[scored.zone_id == zone].sort_values("date")
     fig = go.Figure()
     fig.add_scatter(x=pd.concat([q.date, q.date[::-1]]), y=pd.concat([q.hi, q.lo[::-1]]),

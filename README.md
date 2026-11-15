@@ -149,6 +149,65 @@ It reads the pipeline's outputs and points to the implementation; it does not du
 - **Leakage checks (automated):** training dates precede test dates, encoders, scalers and fallback means are fit
   on training rows only, every model is scored on identical targets, and predictions are finite and non-negative.
 
+## Plan AC use (Next-day priorities page)
+
+The Question B page opens with a **Plan AC use** section; the model comparison and evaluation sit below it, unchanged.
+
+- **Historical replay:** pick a scored 2019 day and see the forecast AC kWh, the actual AC kWh and the signed
+  difference for every scored zone. The ranking uses the forecast only. The actual is the historical meter reading,
+  shown as an outcome known after the day ended.
+- **What-if planning:** pick a target day and a zone (or all AC zones) and enter the inputs the model uses: AC totals
+  1 and 7 days earlier, the previous-seven-day mean, and the previous day's weather. Calendar fields come from the
+  date. "Use a similar historical day" fills the fields from an earlier day (what was known at 00:00 that day, never
+  that day's own AC total) and names the source. Blank lag values are handled as missing; weather is required.
+- **Model:** the one named in `data/processed/qb/decision.json`, with the features and preprocessing of
+  `src/cubems/forecast.py` (`src/cubems/planning.py` only assembles the inputs). A target day is forecast by a model
+  fitted on complete zone-days before the first day of its month, the same rule as the monthly replay.
+- **Dates after 2019** use a model fitted on all of 2019 and are labelled illustrative. They are not validated live
+  forecasts and there is no live weather or meter feed.
+
+## Operations Twin and technician demo (proof of concept)
+
+Two local Streamlit apps share one demo work-order store. Run each in its own terminal:
+
+```powershell
+streamlit run app/Home.py                                # manager dashboard, http://localhost:8501
+streamlit run app/Technician.py --server.port 8502       # technician demo, http://localhost:8502 (use 8503 if busy)
+```
+
+Manager path (Operations Twin page): pick **Sun 27 Oct 2019** (the default) → Floor 2 · Zone 2 is the red top review
+priority (about 203.2 kWh above its expected range) → click it on the building → read "Check before assigning work"
+→ choose **Create inspection work order** → create the draft → assign it to a demo HVAC team.
+
+Technician path (second app): the queue starts with "No inspection work orders assigned." → the assigned work order
+appears within a few seconds → select its row and the same building twin opens on that alert date, zoomed to the
+floor and zone → tick the demo checklist, add a note, **Mark inspection complete (demo)** → the manager page shows
+the zone in the completed colour with "Inspection marked complete (demo)". The "Historical alert only" overlay brings
+back the original red and orange view.
+
+Other useful days: 14 Sep 2019 (13 findings, near-zero expected ranges), any "no findings" day, and any day after
+21 Oct 2019 (Floor 6 hatched as no data).
+
+What is real and what is demo state:
+
+| | Source | Changes when you use the demo? |
+|---|---|---|
+| Meter readings, forecasts, expected ranges, deviations, error metrics | 2019 data and the Question B outputs in `data/processed/` | Never. No page writes to them. |
+| Building drawing | Schematic traced by eye from the published floor plan (`src/cubems/twin.py`). Not to scale, not BIM. | No |
+| What-if forecast | Model output for inputs you type or prefill. A scenario, not a reading. | Recomputed on each edit, never stored |
+| Dispositions, work orders, teams, assignment, checklist, note, completion | `demo_state/operations_twin.sqlite3` (git-ignored) | Yes. This is the only state the demo writes. |
+
+- **Ranking:** review priority = `abs(departure_kwh)`, largest first (ties: floor, then zone). It is not a fault severity.
+- **Renderer:** one inline `st.components.v2` SVG component (`app/components/twin/`) used by both apps: two-way zone
+  selection, no extra dependency.
+- **Shared store:** SQLite with a write transaction per change (`src/cubems/workorders.py`), so the two processes
+  cannot corrupt it or create duplicate work orders. Each app polls a version counter every few seconds. An older
+  `operations_twin.json` store is imported once and kept as `operations_twin.migrated.json`.
+- **Workflow states:** Created → Assigned for inspection → Completed (demo). Only assigned or completed work orders
+  reach the technician. Completion records a demo role and a timestamp. It does not mean anyone visited the
+  building, and no "restored" reading or energy saving is shown.
+- No login, notifications or maintenance-system integration. "Reset demo records" on the manager page clears the store.
+
 ## Repo layout
 
 ```

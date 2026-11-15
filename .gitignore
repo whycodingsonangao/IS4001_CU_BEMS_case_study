@@ -53,3 +53,6 @@ desktop.ini
 .idea/
 *.swp
 ~$*
+
+# ---- Operations Twin demo records (local only, never analytical output) ----
+demo_state/

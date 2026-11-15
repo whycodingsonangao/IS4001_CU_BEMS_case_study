@@ -1,8 +1,8 @@
 """Question B: next-day zone AC totals and the resulting priority list."""
-import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from common import EMPHASIS, MUTED, SERIES, card, load_qb, load_qb_decision, need, page_header, show, style, zone_key
+from plan_section import render as render_plan
 
 page_header("Next-day AC priorities",
             "Forecast each AC zone's total kWh for the next operating day, issued at 00:00 before its readings exist. "
@@ -19,6 +19,10 @@ labels = {"benchmark": "Same zone, seven days earlier", "boosting": "Gradient bo
 fin = metrics[(metrics.subset == "final (all floors)") & (metrics.model == chosen)].iloc[0]
 base = metrics[(metrics.subset == "final (all floors)") & (metrics.model == "benchmark")].iloc[0]
 
+render_plan(dec, pred)
+
+st.markdown("#### Model evaluation")
+st.caption("How the forecast above was chosen and how well it did on days it had not seen.")
 c = st.columns(4)
 c[0].metric("Selected daily model", labels[chosen], border=True)
 c[1].metric("Final MAE", f"{fin.mae:.1f} kWh / zone-day", f"{fin.mae-base.mae:+.1f} vs last week",
@@ -30,22 +34,6 @@ c[3].metric("Top-five zone recall", f"{fin.top5_hit_rate:.1%}", border=True,
                  "highest-use zones on each final-test day.")
 
 final = pred[pred.stage == "final"].copy()
-with card("Which zones need attention?", "Replay a test-day forecast. Rank zones by forecast AC kWh; "
-          "the difference from each zone's historical typical day provides context.",
-          "The typical value is computed from training days available before that test month. Actual use is not used "
-          "to create this priority list."):
-    pick = st.date_input("Forecast date", pd.Timestamp("2019-09-02"),
-                         min_value=final.date.min().date(), max_value=final.date.max().date())
-    day = final[final.date == pd.Timestamp(pick)].copy()
-    day["above_typical_kwh"] = day[chosen] - day["typical_kwh"]
-    day = day.sort_values(chosen, ascending=False)
-    st.dataframe(day[["zone_id", chosen, "typical_kwh", "above_typical_kwh", "benchmark"]],
-                 hide_index=True, width="stretch", height=400, column_config={
-                     "zone_id": "Priority zone", chosen: st.column_config.NumberColumn("Forecast kWh", format="%.1f"),
-                     "typical_kwh": st.column_config.NumberColumn("Typical kWh", format="%.1f"),
-                     "above_typical_kwh": st.column_config.NumberColumn("Above typical", format="%+.1f"),
-                     "benchmark": st.column_config.NumberColumn("Last-week kWh", format="%.1f")})
-
 with card("Evaluation: complete zone-days", "The model is selected using May–Aug development folds. "
           "Sep–Dec is reported with and without Floor 6, whose data ends in October."):
     t = metrics[metrics.subset.isin(["development", "final (all floors)", "final (excl. Floor 6)"])].copy()

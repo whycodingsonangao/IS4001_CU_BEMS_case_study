@@ -19,6 +19,9 @@ pages = {
         st.Page("views/forecast.py", title="Next-day priorities", icon=":material/query_stats:"),
         st.Page("views/exceptions.py", title="Daily deviations", icon=":material/crisis_alert:"),
     ],
+    "Operations Twin": [
+        st.Page("views/twin.py", title="Operations Twin", icon=":material/apartment:"),
+    ],
     "Data": [
         st.Page("views/quality.py", title="Data quality", icon=":material/fact_check:"),
         st.Page("views/sensitivity.py", title="Sensitivity (60/60)", icon=":material/compare_arrows:"),
