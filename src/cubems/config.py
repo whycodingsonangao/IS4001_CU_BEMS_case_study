@@ -1,6 +1,6 @@
 """Project-wide paths and analysis constants.
 
-Every number that encodes a methodological decision lives here, so the pipeline, notebooks and
+Every number that encodes a methodological decision lives here, so the pipeline, notebook and
 dashboard stay consistent. Labels follow the methodology plan: [V] verified, [A] assumption, [D] decision.
 """
 
@@ -13,7 +13,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
 RAW_DIR = Path(os.environ.get("CUBEMS_RAW_DIR", DATA_DIR / "raw"))
-INTERIM_DIR = DATA_DIR / "interim"
 PROCESSED_DIR = DATA_DIR / "processed"
 EXTERNAL_DIR = DATA_DIR / "external"
 REFERENCES_DIR = ROOT / "references"

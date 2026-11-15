@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["jupyterlab>=4", "ipykernel>=6", "matplotlib>=3.8", "seaborn>=0.13", "ruff>=0.5", "pytest>=8"]
+dev = ["jupyterlab>=4", "ipykernel>=6", "ruff>=0.5", "pytest>=8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -9,11 +9,9 @@ requests==2.34.2
 holidays==0.108
 plotly==7.1.0
 streamlit==1.66.1
-# notebooks / dev
+# notebook / dev checks
 jupyterlab==4.6.5
 ipykernel==7.4.0
-matplotlib==3.11.2
-seaborn==0.13.2
 ruff==0.17.3
 pytest==9.2.0
 -e .

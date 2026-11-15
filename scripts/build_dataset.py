@@ -1,4 +1,4 @@
-"""Build every processed table the notebooks and dashboard read.
+"""Build every processed table the notebook, dashboard and analysis scripts read.
 
     python scripts/build_dataset.py              # full build (raw CSVs + weather)
     python scripts/build_dataset.py --no-weather # offline: skip the Open-Meteo call

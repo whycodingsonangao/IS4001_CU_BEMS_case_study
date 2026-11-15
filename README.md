@@ -21,7 +21,7 @@ The complete Question B method, evaluation and facility use case are documented 
 
 Python 3.11+ end to end: **pandas/pyarrow** for the pipeline, **scikit-learn** (k-means, Ridge) and **XGBoost** for
 modelling, and **Streamlit + Plotly** for the localhost dashboard. Analysis code lives in an importable package
-(`src/cubems`), so scripts, notebooks and the dashboard share one implementation of every rule.
+(`src/cubems`), so scripts, the methods notebook and the dashboard share one implementation of every rule.
 
 ## Setup (Windows, PowerShell)
 
@@ -97,6 +97,11 @@ Question B also runs a weekly-block cross-validation diagnostic once (`--skip-di
 streamlit run app/Home.py     # opens http://localhost:8501 (light/dark follows your OS; switch in ⋮ > Settings)
 ```
 
+To inspect the methods and results without the dashboard, run
+`jupyter lab notebooks/01_quickstart.ipynb` after `python scripts/run_all.py`. The notebook walks through
+screening, completeness, cluster selection, forecast folds and model choice, and the strict 60/60 check.
+It reads the pipeline's outputs and points to the implementation; it does not duplicate the methods.
+
 | Page | What it shows |
 |---|---|
 | Energy composition (A) | Floor × end-use stack (1 Jan–21 Oct), Pareto zone ranking, hour × weekday load, after-hours load |
@@ -151,10 +156,9 @@ app/                 Streamlit dashboard (Home.py router + views/, common.py hel
 src/cubems/          config, loader, aggregate, calendar, weather, clustering (A), forecast (B), anomaly
 scripts/             run_all.py (everything), get_data.py, build_dataset.py, run_question_a.py, run_question_b.py
 references/          thai_holidays_2019.csv (cited official holiday list)
-notebooks/           exploration (import from cubems; never re-implement rules)
+notebooks/           read-only methods walkthrough using generated results
 tests/               pytest
-data/{raw,interim,processed,external}/   gitignored
-models/, reports/figures/                gitignored outputs
+data/{raw,processed,external}/   gitignored source data and generated tables
 ```
 
 ## Open items
