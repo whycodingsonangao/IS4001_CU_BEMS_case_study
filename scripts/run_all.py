@@ -33,7 +33,7 @@ def step(name: str, script: str, *args: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--from", dest="src", help="copy raw CSVs from this folder instead of downloading")
-    ap.add_argument("--no-weather", action="store_true", help="skip the Open-Meteo call (also skips Question B)")
+    ap.add_argument("--no-weather", action="store_true", help="omit locked weather (also skips Question B)")
     ap.add_argument("--quick", action="store_true", help="main 57/60 rule only; skip the 60/60 run and diagnostic")
     ap.add_argument("--serve", action="store_true", help="launch the Streamlit dashboard when the build finishes")
     ap.add_argument("--skip-build", action="store_true", help="with --serve: open the dashboard without rebuilding")

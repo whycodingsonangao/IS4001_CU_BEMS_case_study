@@ -1,7 +1,7 @@
 """Build every processed table the notebook, dashboard and analysis scripts read.
 
     python scripts/build_dataset.py              # full build (raw CSVs + weather)
-    python scripts/build_dataset.py --no-weather # offline: skip the Open-Meteo call
+    python scripts/build_dataset.py --no-weather # omit the locked weather input
 
 Outputs (all gitignored, regenerate any time):
     data/processed/zone_hourly.parquet  one row per zone x hour, kWh + valid-minute counts
@@ -10,8 +10,9 @@ Outputs (all gitignored, regenerate any time):
     data/processed/zones.parquet        zone registry (group, AC units, sensors)
     data/processed/qc_events.parquet    screened-out spike / flatline episodes (per channel)
     data/processed/qc_channels.parquet  per-channel screening thresholds and counts
-    data/external/weather_hourly.parquet  cached Open-Meteo pull
     data/processed/weather_daily.parquet
+
+Weather input: references/weather_hourly_2018-2019.parquet (checked in and checksum verified).
 """
 
 from __future__ import annotations
@@ -30,8 +31,9 @@ from cubems.weather import daily_features, load_hourly
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--no-weather", action="store_true", help="skip the Open-Meteo download")
-    ap.add_argument("--refresh-weather", action="store_true", help="re-download weather")
+    ap.add_argument("--no-weather", action="store_true", help="skip the locked weather snapshot")
+    ap.add_argument("--refresh-weather", action="store_true",
+                    help="reserved: fails until the weather lock is updated intentionally")
     args = ap.parse_args()
 
     files = available_files()
@@ -68,14 +70,11 @@ def main() -> int:
 
     zd = to_zone_day(hourly_df)
     if not args.no_weather:
-        try:
-            wd = daily_features(load_hourly(refresh=args.refresh_weather))
-            wd.to_parquet(config.WEATHER_DAILY_PATH, index=False)
-            zd = zd.merge(wd.add_prefix("wx_").rename(columns={"wx_date": "date"}), on="date",
-                          how="left")
-            print(f"  weather: {len(wd)} days joined")
-        except Exception as e:  # network down etc. - the rest of the build is still useful
-            print(f"  WARNING weather skipped: {e}", file=sys.stderr)
+        wd = daily_features(load_hourly(refresh=args.refresh_weather))
+        wd.to_parquet(config.WEATHER_DAILY_PATH, index=False)
+        zd = zd.merge(wd.add_prefix("wx_").rename(columns={"wx_date": "date"}), on="date",
+                      how="left")
+        print(f"  weather: {len(wd)} days joined")
     zd.to_parquet(config.ZONE_DAY_PATH, index=False)
 
     print(f"\nzone-hours {len(hourly_df):,} | zone-days {len(zd):,} | zones {len(zones_df)}")

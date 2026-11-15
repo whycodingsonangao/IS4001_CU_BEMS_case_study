@@ -10,12 +10,16 @@ only joined to the AC-metered (Model 1) zones in analysis.
 
 from __future__ import annotations
 
+import hashlib
+
 import pandas as pd
 import requests
 
 from . import config
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+LOCKED_WEATHER_PATH = config.REFERENCES_DIR / "weather_hourly_2018-2019.parquet"
+LOCKED_WEATHER_SHA256 = "b9493247eebcc3c2ef5778d49888f6732c47768f05d67e304f88f78b3cfba076"
 
 
 def fetch_hourly(start: str = "2018-07-01", end: str = "2019-12-31") -> pd.DataFrame:
@@ -37,13 +41,19 @@ def fetch_hourly(start: str = "2018-07-01", end: str = "2019-12-31") -> pd.DataF
 
 
 def load_hourly(refresh: bool = False) -> pd.DataFrame:
-    path = config.WEATHER_HOURLY_PATH
-    if path.exists() and not refresh:
-        return pd.read_parquet(path)
-    df = fetch_hourly()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(path, index=False)
-    return df
+    """Read the exact weather snapshot used for the submitted results.
+
+    A mutable API response or a machine-local cache must never silently change the
+    features used by Question B. Refreshing requires an intentional snapshot update.
+    """
+    if refresh:
+        raise ValueError("Weather is locked; update the committed snapshot and checksum intentionally.")
+    if not LOCKED_WEATHER_PATH.is_file():
+        raise FileNotFoundError(f"Locked weather snapshot is missing: {LOCKED_WEATHER_PATH}")
+    digest = hashlib.sha256(LOCKED_WEATHER_PATH.read_bytes()).hexdigest()
+    if digest != LOCKED_WEATHER_SHA256:
+        raise ValueError(f"Locked weather snapshot checksum mismatch: {LOCKED_WEATHER_PATH}")
+    return pd.read_parquet(LOCKED_WEATHER_PATH)
 
 
 def daily_features(hourly: pd.DataFrame, cdh_base: float = config.CDH_BASE_C) -> pd.DataFrame:

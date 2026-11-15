@@ -1,4 +1,4 @@
-# ---- Data (never commit raw or derived data; it is ~700 MB) ----
+# ---- Data (raw and derived outputs stay local; the small locked weather input is an exception) ----
 data/raw/*
 data/processed/*
 data/external/*
@@ -9,8 +9,9 @@ data/external/*
 *.h5
 *.pkl
 *.joblib
-# Allow small hand-made reference tables if you need them:
+# Keep the reference tables and the fixed weather input:
 !references/**/*.csv
+!references/weather_hourly_2018-2019.parquet
 
 # ---- Local research ----
 local_research/

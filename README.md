@@ -60,12 +60,17 @@ handles it, or you can run the two data steps yourself (venv active):
 
 ```powershell
 python scripts/get_data.py        # downloads the 14 CSVs from the authors' site into data/raw/ and checks them
-python scripts/build_dataset.py   # ~30 s: builds data/processed/ (+ one Open-Meteo call; --no-weather if offline)
+python scripts/build_dataset.py   # ~30 s: builds data/processed/ using the locked weather snapshot
 ```
 
 `get_data.py` pulls the zips from the dataset's official page (<https://sgrudata.github.io/>), extracts only
 the CSVs, and checks each one against a SHA-256 checksum, so everyone runs on byte-identical data. It skips files
 that are already valid, so re-running it is safe.
+
+Historical weather is fixed too. The repo includes the Open-Meteo hourly snapshot used for the submitted results
+at `references/weather_hourly_2018-2019.parquet`. The build checks its SHA-256, ignores any old local weather cache,
+and stops if the snapshot is missing or altered. A fresh clone does not call Open-Meteo. `--refresh-weather` fails
+until the checked-in snapshot and checksum are intentionally updated together.
 
 - **Already have the files** (e.g. a Kaggle download)? `python scripts/get_data.py --from "C:\path\to\folder"`
   copies and checks them instead of downloading.
